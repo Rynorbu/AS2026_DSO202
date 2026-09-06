@@ -532,6 +532,9 @@ To reuse the PV, an adminsitrator must manually clean it up. They can either del
 
 ## Reflection
 
+During the practical, I faced an issue where the `dynamic-data` PVC remained in the `Pending` state. I used `kubectl describe pvc dynamic-data` to investigate and found the message “waiting for first consumer to be created before binding.” I learned that this was expected because the `standard` StorageClass uses `WaitForFirstConsumer`. Kubernetes waits for a Pod to use the PVC before selecting the appropriate node and creating the volume. After creating the `dynamic-writer` Pod, the PVC changed to `Bound` and the volume was created. This taught me that a `Pending` PVC does not always mean there is an error, so checking the events with `kubectl describe` is important.
+
+I also encountered an error when trying to increase the `dynamic-data` PVC from 1Gi to 2Gi. I used `kubectl patch pvc dynamic-data --type merge -p ...`, but Kubernetes returned a `Forbidden` error. I checked the StorageClass and found that `allowVolumeExpansion` was set to `false`. Therefore, the PVC could not be resized. This helped me understand that PVC expansion depends on the StorageClass configuration and that its settings must be checked before modifying storage.
 
 
 ## References
@@ -539,5 +542,3 @@ To reuse the PV, an adminsitrator must manually clean it up. They can either del
 - https://hackmd.io/@sarojsanyasi/dso202-practical-02
 
 - https://hackmd.io/@sarojsanyasi/B1ZPV7oPMx
-
-- 
