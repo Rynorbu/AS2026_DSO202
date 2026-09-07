@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: Service
+metadata:
+  creationTimestamp: "2026-09-06T17:53:32Z"
+  labels:
+    tier: backend
+  name: backend-svc
+  namespace: dso202-assignment-01
+  resourceVersion: "8003"
+  uid: 83b77b1d-7a6e-437f-b949-10ae273abed2
+spec:
+  clusterIP: 10.96.60.124
+  clusterIPs:
+  - 10.96.60.124
+  internalTrafficPolicy: Cluster
+  ipFamilies:
+  - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+  - port: 8080
+    protocol: TCP
+    targetPort: 8080
+  selector:
+    tier: backend
+  sessionAffinity: None
+  type: ClusterIP
+status:
+  loadBalancer: {}

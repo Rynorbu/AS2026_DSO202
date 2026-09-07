@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"v1","kind":"Service","metadata":{"annotations":{},"labels":{"tier":"backend"},"name":"backend-svc","namespace":"dso202-assignment-01"},"spec":{"ports":[{"port":8080,"targetPort":8080}],"selector":{"tier":"backend"},"type":"ClusterIP"}}
+  creationTimestamp: "2026-09-06T17:08:11Z"
+  labels:
+    tier: backend
+  name: backend-svc
+  namespace: dso202-assignment-01
+  resourceVersion: "3794"
+  uid: c26c7255-d547-4294-95ea-d10e4c4d596b
+spec:
+  clusterIP: 10.96.251.105
+  clusterIPs:
+  - 10.96.251.105
+  internalTrafficPolicy: Cluster
+  ipFamilies:
+  - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+  - port: 8080
+    protocol: TCP
+    targetPort: 8080
+  selector:
+    tier: backend
+  sessionAffinity: None
+  type: ClusterIP
+status:
+  loadBalancer: {}
