@@ -1,0 +1,55 @@
+# =============================================================================
+# File        : manifests/04-service-db-headless.yaml
+# Assignment  : DSO202 Assignment 2
+# Purpose     : A headless Service for the database StatefulSet.
+#
+#               NORMAL Service  = has one IP address, load-balances traffic
+#                                 across all matching Pods
+#               HEADLESS Service = has NO IP address (clusterIP: None),
+#                                 instead gives each Pod its own DNS name
+#
+#               We need a headless Service for the database because:
+#               - A database Pod needs a STABLE, PREDICTABLE name
+#               - The StatefulSet uses this Service to give each Pod a
+#                 unique DNS entry:
+#                   db-0.db-headless.dso202-assignment-02.svc.cluster.local
+#                   ^^^^  ^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^
+#                   pod   service     namespace
+#
+#               IMPORTANT: This file MUST be applied BEFORE the StatefulSet
+#               (file 05). The StatefulSet looks for this Service by name
+#               when it starts. If it does not exist, DNS names will not work.
+#
+# Apply with  : kubectl apply -f manifests/04-service-db-headless.yaml
+# Verify      : kubectl get service db-headless -n dso202-assignment-02
+#               The CLUSTER-IP column must show "None"
+# =============================================================================
+
+apiVersion: v1
+kind: Service
+metadata:
+  # This name must EXACTLY match the 'serviceName' field in the StatefulSet
+  # (file 05). If they do not match, the per-Pod DNS names will not work.
+  name: db-headless
+  namespace: dso202-assignment-02
+  labels:
+    app: db
+    tier: database
+    dso202/assignment: "02"
+    dso202/managed-by: declarative
+spec:
+  # THIS is what makes the Service headless.
+  # clusterIP: None means: do not create a virtual IP address.
+  # Instead, let DNS point directly to each individual Pod.
+  clusterIP: None
+
+  # Match Pods that have the label app: db
+  # (the StatefulSet sets this label on its Pods)
+  selector:
+    app: db
+
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+      protocol: TCP

@@ -1,0 +1,66 @@
+# =============================================================================
+# File        : manifests/08-deployment-frontend.yaml
+# Assignment  : DSO202 Assignment 2
+# Purpose     : The frontend nginx web server that serves the UI to the browser.
+#
+#               Like the backend, the frontend is STATELESS. A Deployment
+#               is the correct controller. Each replica serves exactly the
+#               same files and any one of them can handle any request.
+#
+#               In Assignment 1, this was exposed directly via NodePort
+#               (port 30080). In Assignment 2, the frontend Service is
+#               ClusterIP and the Ingress (file 10) handles external access.
+#               The browser goes to http://tasktracker.local instead of
+#               http://localhost:30080.
+#
+# Apply with  : kubectl apply -f manifests/08-deployment-frontend.yaml
+# =============================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-deployment
+  namespace: dso202-assignment-02
+  labels:
+    app: frontend
+    tier: frontend
+    dso202/assignment: "02"
+    dso202/managed-by: declarative
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+        tier: frontend
+        dso202/assignment: "02"
+        dso202/managed-by: declarative
+    spec:
+      terminationGracePeriodSeconds: 10
+      containers:
+        - name: frontend
+          image: rynorbu11/dso202-frontend:1.0
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+
+          env:
+            - name: BACKEND_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: BACKEND_URL
+
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "150m"
+              memory: "128Mi"

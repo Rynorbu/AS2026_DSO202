@@ -1,0 +1,39 @@
+# =============================================================================
+# File        : manifests/07-service-backend.yaml
+# Assignment  : DSO202 Assignment 2
+# Purpose     : Expose the backend Deployment inside the cluster so that
+#               the Ingress Controller (file 10) can forward /api/* traffic
+#               to it.
+#
+#               Type ClusterIP means this Service is only reachable from
+#               INSIDE the cluster — not from your browser directly.
+#               The Ingress (file 10) is what makes it reachable from outside.
+#
+# Apply with  : kubectl apply -f manifests/07-service-backend.yaml
+# =============================================================================
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-svc
+  namespace: dso202-assignment-02
+  labels:
+    app: backend
+    tier: backend
+    dso202/assignment: "02"
+    dso202/managed-by: declarative
+spec:
+  # ClusterIP = internal only. Only reachable from inside the cluster.
+  # The Ingress Controller (also running inside the cluster) will forward
+  # /api/* requests to this Service.
+  type: ClusterIP
+
+  # Match Pods with label app: backend
+  selector:
+    app: backend
+
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP

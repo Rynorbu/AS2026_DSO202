@@ -1,0 +1,47 @@
+# =============================================================================
+# File        : manifests/09-service-frontend.yaml
+# Assignment  : DSO202 Assignment 2
+# Purpose     : Expose the frontend Deployment inside the cluster so that
+#               the Ingress Controller (file 10) can forward traffic to it.
+#
+# KEY DIFFERENCE FROM ASSIGNMENT 1:
+#   Assignment 1:  type: NodePort  (port 30080)
+#   Assignment 2:  type: ClusterIP
+#
+#   In Assignment 1, we opened a port directly on the cluster node so the
+#   browser could access the frontend at http://localhost:30080.
+#
+#   In Assignment 2, we no longer need that because the Ingress Controller
+#   (file 10) is our single entry point. The browser goes to
+#   http://tasktracker.local and the Ingress routes the request to this
+#   ClusterIP Service internally.
+#
+#   This is the correct real-world pattern — production applications do not
+#   expose individual NodePorts. Everything goes through the Ingress.
+#
+# Apply with  : kubectl apply -f manifests/09-service-frontend.yaml
+# =============================================================================
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-svc
+  namespace: dso202-assignment-02
+  labels:
+    app: frontend
+    tier: frontend
+    dso202/assignment: "02"
+    dso202/managed-by: declarative
+spec:
+  # ClusterIP = internal only. The Ingress Controller routes / traffic here.
+  # No NodePort needed — the Ingress handles external access on port 80.
+  type: ClusterIP
+
+  selector:
+    app: frontend
+
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP

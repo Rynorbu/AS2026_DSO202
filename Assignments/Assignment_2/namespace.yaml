@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dso202-assignment-02
+  labels:
+    dso202/assignment: "02"
+    dso202/managed-by: declarative
+  annotations:
+    dso202.cst.edu.bt/description: "Namespace for DSO202 Assignment 2 - StatefulSets and Ingress"
+    dso202.cst.edu.bt/owner: "Rynorbu"
+    dso202.cst.edu.bt/date: "2026-09-27"

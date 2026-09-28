@@ -1,0 +1,79 @@
+# =============================================================================
+# File        : manifests/01-quota-and-limits.yaml
+# Assignment  : DSO202 Assignment 2
+# Purpose     : ResourceQuota sets the MAXIMUM resources the whole namespace
+#               can use in total. LimitRange sets the default resources for
+#               each individual container if the container does not say.
+#
+#               Think of it like this:
+#                 ResourceQuota = the budget for the whole class
+#                 LimitRange    = the default spending limit per student
+#
+# Apply with  : kubectl apply -f manifests/01-quota-and-limits.yaml
+# =============================================================================
+
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: dso202-a2-quota
+  namespace: dso202-assignment-02
+  labels:
+    dso202/assignment: "02"
+    dso202/managed-by: declarative
+spec:
+  hard:
+    # --- How many Pods can exist in this namespace at once -----------------
+    pods: "10"
+
+    # --- CPU limits --------------------------------------------------------
+    # requests.cpu  = minimum CPU guaranteed across all containers
+    # limits.cpu    = maximum CPU allowed across all containers
+    requests.cpu: "1"
+    limits.cpu: "2"
+
+    # --- Memory limits -----------------------------------------------------
+    requests.memory: 1Gi
+    limits.memory: 2Gi
+
+    # --- Storage limits ----------------------------------------------------
+    # Maximum number of PersistentVolumeClaims (PVCs) allowed.
+    # Our StatefulSet creates 1 PVC automatically, so 6 is plenty.
+    persistentvolumeclaims: "6"
+
+    # Maximum total storage requested across all PVCs combined.
+    requests.storage: 10Gi
+
+---
+
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: dso202-a2-limits
+  namespace: dso202-assignment-02
+  labels:
+    dso202/assignment: "02"
+    dso202/managed-by: declarative
+spec:
+  limits:
+    # Default values applied to every container that does not set its own.
+    # All our containers set their own values, but this is a safety net.
+    - type: Container
+      default:
+        cpu: 200m
+        memory: 256Mi
+      defaultRequest:
+        cpu: 100m
+        memory: 128Mi
+      min:
+        cpu: 50m
+        memory: 64Mi
+      max:
+        cpu: 500m
+        memory: 512Mi
+
+    # Prevent any single PVC from being too small or too large.
+    - type: PersistentVolumeClaim
+      min:
+        storage: 100Mi
+      max:
+        storage: 5Gi

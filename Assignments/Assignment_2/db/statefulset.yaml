@@ -1,0 +1,117 @@
+# Apply with  : kubectl apply -f manifests/05-statefulset-db.yaml
+# Connect     : kubectl exec -it db-0 -n dso202-assignment-02 -- \
+#                 psql -U taskuser -d taskdb
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: db
+  namespace: dso202-assignment-02
+  labels:
+    app: db
+    tier: database
+    dso202/assignment: "02"
+    dso202/managed-by: declarative
+spec:
+  serviceName: db-headless
+  replicas: 1
+  podManagementPolicy: OrderedReady
+
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      partition: 0
+
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+
+  selector:
+    matchLabels:
+      app: db
+
+  template:
+    metadata:
+      labels:
+        app: db
+        tier: database
+        dso202/assignment: "02"
+        dso202/managed-by: declarative
+    spec:
+      terminationGracePeriodSeconds: 60
+
+      containers:
+        - name: db
+          image: rynorbu11/dso202-db:1.0
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: postgres
+              containerPort: 5432
+              protocol: TCP
+
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: app-secret
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: app-secret
+                  key: POSTGRES_PASSWORD
+
+          volumeMounts:
+            - name: db-storage
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 6
+
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "250m"
+              memory: "256Mi"
+
+  volumeClaimTemplates:
+    - metadata:
+        name: db-storage
+
+        labels:
+          app: db
+          tier: database
+          dso202/assignment: "02"
+          dso202/managed-by: declarative
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi

@@ -1,0 +1,100 @@
+# =============================================================================
+# File        : manifests/06-deployment-backend.yaml
+# Assignment  : DSO202 Assignment 2
+# Purpose     : The backend REST API that handles requests from the frontend
+#               and reads/writes data to the database.
+#
+#               A Deployment is correct here because the backend is STATELESS.
+#               It does not own any data. Any backend Pod can handle any
+#               request — they are all identical. If one dies, a new one
+#               takes its place with no data loss.
+#
+#               The backend connects to the database using the headless
+#               Service name "db-headless". This name never changes even
+#               if the database Pod is restarted — that is the benefit
+#               of the StatefulSet's stable DNS.
+#
+# Apply with  : kubectl apply -f manifests/06-deployment-backend.yaml
+# =============================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-deployment
+  namespace: dso202-assignment-02
+  labels:
+    app: backend
+    tier: backend
+    dso202/assignment: "02"
+    dso202/managed-by: declarative
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+        tier: backend
+        dso202/assignment: "02"
+        dso202/managed-by: declarative
+    spec:
+      terminationGracePeriodSeconds: 10
+      containers:
+        - name: backend
+          image: rynorbu11/dso202-backend:1.0
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+
+          env:
+            # All values come from ConfigMap (file 03) and Secret (file 02).
+            # Nothing is hardcoded here — if we need to change the database
+            # host or port, we update the ConfigMap, not this file.
+            - name: DB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: DB_HOST
+            - name: DB_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: DB_PORT
+            - name: DB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: DB_NAME
+            - name: APP_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: APP_PORT
+            - name: CORS_ORIGIN
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: CORS_ORIGIN
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: app-secret
+                  key: DB_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: app-secret
+                  key: DB_PASSWORD
+
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "250m"
+              memory: "256Mi"

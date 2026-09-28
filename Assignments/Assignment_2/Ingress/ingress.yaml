@@ -1,0 +1,39 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: dso202-ingress
+  namespace: dso202-assignment-02
+  annotations:
+    # Traefik-specific annotations
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    # traefik.ingress.kubernetes.io/router.priority: "10"   # optional: rule priority
+spec:
+  ingressClassName: traefik
+  tls:                               # TLS termination at Traefik
+    - hosts:
+        - app.dso202.local
+        - api.dso202.local
+      secretName: dso202-tls         # created in README step 6
+  rules:
+    # Name-based virtual hosting: same IP/port, routed by Host header
+    - host: app.dso202.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend-svc
+                port:
+                  number: 8080
+    - host: api.dso202.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: backend-svc
+                port:
+                  number: 8080
