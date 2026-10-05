@@ -10,7 +10,7 @@ data:
   DB_NAME: "tasksdb"
   APP_PORT: "8080"
   CORS_ORIGIN: "*"
-  BACKEND_URL: "http://backend-svc:8080"
+  BACKEND_URL: /api #"http://backend-svc:8080"
 
   POSTGRES_DB: "tasksdb"
   # Data goes in a sub-folder so the volume root's lost+found doesn't break initdb

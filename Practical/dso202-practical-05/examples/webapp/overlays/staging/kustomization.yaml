@@ -8,6 +8,7 @@ labels:
   - pairs:
       environment: staging
     includeSelectors: false
+    includeTemplates: true
 replicas:
   - name: webapp
     count: 2
