@@ -117,11 +117,11 @@ Both tiers are stateless and remain **Deployments**. Unlike Assignment 1, **both
 
 I first tried to install the NGINX Ingress Controller with its kind manifest, but the controller pod never started:
 
-![NGINX controller: FailedScheduling](assets/error.png)
+![NGINX controller: FailedScheduling](screesnot/assets/error.png)
 
 > **FailedScheduling: didn't match Pod's node affinity/selector.** The kind version of the NGINX manifest only schedules the controller on a node labelled `ingress-ready=true`, and my cluster's nodes did not have that label.
 
-![NGINX controller: webhook secret missing](assets/error2.png)
+![NGINX controller: webhook secret missing](screesnot/assets/error2.png)
 
 > After the pod was scheduled, it failed with **`MountVolume.SetUp failed for volume "webhook-cert": secret "ingress-nginx-admission" not found`**, because the admission webhook certificate job had not completed.
 

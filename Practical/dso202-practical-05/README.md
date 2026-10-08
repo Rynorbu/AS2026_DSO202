@@ -1,259 +1,261 @@
 # Practical 5: Environment-Specific Configuration with Kustomize on Kind
 
+## Aim
+
+To deploy one web application to several environments (dev, staging, prod and qa) using **Kustomize**. All environments share one set of base files. Each environment keeps only its own small changes.
+
 ## Objectives
 
-- Render a base and multiple overlays (dev, staging, prod, qa, sandbox)
-- Deploy every environment without copying the base Deployment or Service
-- Use namespace, labels, replicas, images, configMapGenerator, and patches
-- Observe the ConfigMap hash → rollout behaviour
-- Follow the safe workflow: **render → diff → apply → verify**
-- Diagnose problems from rendered output
+- Understand the difference between a **base** and an **overlay** in Kustomize.
+- Render (preview) the final Kubernetes files before applying them.
+- Deploy dev, staging, prod and qa without copying the Deployment or Service files.
+- See how a change in page content creates a new ConfigMap name and restarts the pods automatically.
+- Use two kinds of patches: a **strategic merge patch** and a **JSON 6902 patch**.
+- Follow a safe workflow: **render - diff - apply - verify**.
 
-## Lab Topology
+## Background
 
-```
-Kind cluster                Namespaces
-├── control-plane           ├── webapp-dev
-├── worker-node-1           ├── webapp-staging
-└── worker-node-2           ├── webapp-prod
-                            └── webapp-qa
-```
+When an application runs in many environments, most of its settings are the same. Only a few things change, such as the number of replicas, the image version or the resource limits. If we copy the full YAML files for every environment, the copies slowly drift apart and become hard to maintain.
 
----
+**Kustomize** solves this problem:
 
-### Task 0: Pre-flight checks
+- The **base** holds the files that every environment shares (Deployment, Service and the default web page).
+- Each **overlay** points to the base and adds only what is different for that environment.
+- Kustomize joins the base and the overlay to produce the final files. We do not need to write any templates.
 
-```bash
-kubectl cluster-info
-kubectl get nodes -o wide
-kubectl version --client -o yaml
-```
+## Lab Setup
 
-![Pre-flight](assets/0.png)
-
-All nodes are `Ready`, the context points to the Kind cluster and the client includes Kustomize, so `-k` is supported.
+| Item | Details |
+|---|---|
+| Cluster | Kind cluster with 1 control-plane node and 2 worker nodes |
+| Application | A small NGINX web server that shows one HTML page |
+| Namespaces | `webapp-dev`, `webapp-staging`, `webapp-prod`, `webapp-qa` (plus `webapp-sandbox` for the challenge) |
+| Tools | kubectl (with built-in Kustomize), Kind, Docker |
 
 ---
 
-### Task 1: Repository structure
+## Task 0: Pre-flight Checks
 
-```bash
-tree examples/webapp      
-```
+Before starting, I checked that the cluster was working. I confirmed that kubectl was connected to the Kind cluster, that all three nodes were **Ready**, and that my kubectl version includes Kustomize.
 
-![Tree](assets/tree.png)
+![Pre-flight checks](assets/0.png)
 
-1. **Files that exist once for all environments:** `base/deployment.yaml`, `base/service.yaml`, `base/kustomization.yaml` (and the default `base/index.html`).
-2. **Values that differ:** namespace, `environment` label, replica count, image tag, page content (`index.html`), resource requests/limits, annotations.
-3. **Where the differences live:** only in `overlays/<env>/kustomization.yaml` plus small files next to it (`index.html`, `namespace.yaml`, patch files).
+**Result:** The cluster was healthy and ready for the practical.
 
 ---
 
-### Task 2: Render the base
+## Task 1: Understanding the Repository
 
-```bash
-kubectl kustomize examples/webapp/base
-kubectl kustomize examples/webapp/base | grep '^kind:'
-kubectl kustomize examples/webapp/base | grep 'name: web-content'
-```
+The project has one `base` folder and one folder for each environment inside `overlays`.
+
+![Repository tree](assets/tree.png)
+
+**1. Which files are shared by all environments?**
+The files in the `base` folder: the Deployment, the Service, the base kustomization file and the default `index.html` page.
+
+**2. Which values are different between environments?**
+The namespace, the environment label, the number of replicas, the image tag, the web page content, the CPU and memory resources, and the annotations.
+
+**3. Where do the differences live?**
+Only inside each overlay folder. Every overlay has its own kustomization file, an `index.html` page, a namespace file and, when needed, a small patch file.
+
+---
+
+## Task 2: Rendering the Base
+
+I rendered the base to see the final output without applying anything to the cluster.
 
 ![Base render](assets/2.png)
-![Base filters](assets/render.png)
 
-- Resources rendered: `ConfigMap`, `Service`, `Deployment`.
-- Generated ConfigMap name: `web-content-<hash>` (e.g. `web-content-t9bf58c444`).
-- The Deployment volume `configMap.name` was rewritten from `web-content` to `web-content-<hash>`.
+![Resource kinds and ConfigMap name](assets/filters.png)
 
-**Checkpoint — why is the name not `web-content`?**
-`configMapGenerator` appends a hash of the ConfigMap's content to its name. Kustomize then rewrites every reference to it (here, the Deployment's volume). When the content changes, the name changes too, so the Deployment's pod template changes and Kubernetes rolls out new pods. Without the hash, pods would keep serving the old content.
+**Observations:**
+- The base creates three resources: a **ConfigMap**, a **Service** and a **Deployment**.
+- The ConfigMap is not named `web-content`. It is named `web-content-85cmt8h6mg`.
+- Kustomize also updated the Deployment so that its volume now uses the new name `web-content-85cmt8h6mg`.
+
+**Checkpoint: Why is the ConfigMap name not exactly `web-content`?**
+The ConfigMap generator adds a short **hash** to the end of the name. This hash is calculated from the content of the ConfigMap. If the content changes, the hash changes, so the name changes too. Kustomize then updates the Deployment to use the new name. Because the Deployment has changed, Kubernetes starts new pods that show the new content. Without the hash, the old pods would keep showing the old page.
 
 ---
 
-### Task 3: Compare dev and prod renderings
+## Task 3: Comparing Dev and Prod
 
-```bash
-kubectl kustomize examples/webapp/overlays/dev  > /tmp/webapp-dev.yaml
-kubectl kustomize examples/webapp/overlays/prod > /tmp/webapp-prod.yaml
-diff -u /tmp/webapp-dev.yaml /tmp/webapp-prod.yaml || true
-```
+I rendered the dev and prod overlays into two files and compared them side by side.
 
-![dev vs prod diff](assets/diff.png)
+![Dev vs prod difference](assets/diff.png)
 
-| # | Difference | dev | prod |
+| # | What is different | Dev | Prod |
 |---|---|---|---|
 | 1 | Namespace | `webapp-dev` | `webapp-prod` |
-| 2 | `environment` label | `dev` | `prod` |
-| 3 | Replicas | 1 | 3 |
-| 4 | Image | `nginx:1.25` | `nginx:1.25.5` |
-| 5 | Resources (requests / limits CPU) | 50m / 100m | 200m / 500m |
-| 6 | Page content / ConfigMap hash | development page | production page |
-| 7 | Annotation | none | `training.example.com/tier: production` |
+| 2 | Environment label | `dev` | `prod` |
+| 3 | Number of replicas | 1 | 3 |
+| 4 | NGINX image | `nginx:1.25` | `nginx:1.25.5` |
+| 5 | CPU request / limit | 50m / 100m | 200m / 500m |
+| 6 | Web page and ConfigMap hash | Development page | Production page |
+| 7 | Annotation | None | `training.example.com/tier: production` |
 
-The diff is only a few readable lines. With fully copied manifests, a reviewer would have to compare two complete files to find the same changes.
-
----
-
-### Task 4: Deploy dev safely
-
-```bash
-kubectl kustomize examples/webapp/overlays/dev
-kubectl diff -k examples/webapp/overlays/dev || true
-kubectl apply -k examples/webapp/overlays/dev
-kubectl get all -n webapp-dev
-kubectl get configmap -n webapp-dev
-kubectl rollout status deployment/webapp -n webapp-dev
-```
-
-![dev render](assets/3.png)
-![dev apply](assets/3.1.png)
-![get all dev](assets/3.2.png)
-
-The Deployment keeps the base name `webapp`. The `webapp-dev` namespace is what isolates the environment.
+**What I learned:** The difference between the two environments is only a few lines, so it is easy to read and review. If we had copied the full files, we would have to compare two long files line by line to find the same changes.
 
 ---
 
-### Task 5: Access the application
+## Task 4: Deploying Dev Safely
 
-```bash
-kubectl port-forward -n webapp-dev service/webapp 8080:80
-# second terminal
-curl http://127.0.0.1:8080
-```
+I followed the safe workflow for the dev environment:
 
-![port-forward](assets/port_forwarding.png)
-![curl dev](assets/curl_base.png)
+1. **Render**: I previewed the final output first.
+2. **Diff**: I checked what would change in the cluster.
+3. **Apply**: I deployed the dev overlay.
+4. **Verify**: I checked the resources, the ConfigMap and the rollout status.
 
+![Dev render](assets/3.png)
 
-The response is `<h1>This is for the development environment</h1>`, which confirms the dev overlay's content is being served.
+![Dev apply](assets/3.1.png)
+
+![All resources in webapp-dev](assets/3.2.png)
+
+**Result:** The ConfigMap, Service, Deployment and pod were all created in the `webapp-dev` namespace. The Deployment keeps the base name `webapp`. The namespace is what keeps each environment separate.
 
 ---
 
-### Task 6: Prove the ConfigMap hash → rollout chain
+## Task 5: Accessing the Application
 
-**Before**
+I used port-forwarding to open the dev service on my own computer, and then sent a request to it.
 
-```bash
-kubectl get configmap -n webapp-dev
-kubectl get pods -n webapp-dev -o wide
-```
+![Port forwarding](assets/port_forwarding.png)
 
-![before](assets/6.png)
+![Response from the dev app](assets/curl_base.png)
 
-Edit `examples/webapp/overlays/dev/index.html` → `<h1>DEV v2 — configuration changed</h1>`
+**Result:** The app replied with *"This is for the development environment"*. This shows that the dev overlay's own page was being served, not the base page. I stopped the port-forward after the test.
 
-```bash
-kubectl kustomize examples/webapp/overlays/dev | grep 'name: web-content'
-kubectl apply -k examples/webapp/overlays/dev
-kubectl rollout status deployment/webapp -n webapp-dev
-```
+---
 
-![render after edit](assets/6.1.png)
+## Task 6: Proving the ConfigMap Hash and Rollout Chain
 
-**After**
+**Before the change:** I recorded the current ConfigMap and pod names.
 
-```bash
-kubectl get configmap -n webapp-dev
-kubectl get pods -n webapp-dev -o wide
-```
+![Before the change](assets/6.png)
 
-![after](assets/6.2.png)
+**The change:** I edited the dev web page to say *"DEV v2: configuration changed"*. Before applying, I rendered the overlay again and saw a new ConfigMap name. Then I applied it and waited for the rollout to finish.
+
+![Render after editing the page](assets/6.1.png)
+
+**After the change:** I checked the ConfigMap and pod names again.
+
+![After the change](assets/6.2.png)
 
 | | Before | After |
 |---|---|---|
-| ConfigMap | `web-content-XXXX` | `web-content-YYYY` |
-| Pod | `webapp-XXXX-xxxxx` | `webapp-YYYY-yyyyy` |
+| ConfigMap | `web-content-g4dk89cbgg` | `web-content-9695bk2kdg` |
+| Pod | `webapp-68d985d97b-7cmn7` | `webapp-56c7c496b6-frjpk` |
 
-```
-file content changed → generated ConfigMap content changed
-→ generated ConfigMap name hash changed → Deployment reference changed
-→ Deployment pod template changed → rollout occurred
-```
+**How a content change leads to a rollout (in my own words):**
+I only changed one HTML file. Because the content changed, Kustomize gave the ConfigMap a new hash and a new name. Kustomize also updated the Deployment to point to this new name. A change inside the Deployment's pod template tells Kubernetes to replace the old pods. So the old pod was removed and a new pod started with the new page. I did not have to restart anything by hand.
+
+> File content changed → ConfigMap content changed → ConfigMap name changed → Deployment updated → New pods rolled out
 
 ---
 
-### Task 7: Deploy staging and prod
+## Task 7: Deploying Staging and Prod
 
-```bash
-kubectl diff -k examples/webapp/overlays/staging || true
-kubectl apply -k examples/webapp/overlays/staging
-kubectl diff -k examples/webapp/overlays/prod || true
-kubectl apply -k examples/webapp/overlays/prod
-kubectl get deploy -A -l app.kubernetes.io/name=webapp
-kubectl get pods -A -l app.kubernetes.io/name=webapp -o wide
-```
+I checked the diff and then applied the staging and prod overlays. After that, I listed the Deployments and pods in all namespaces.
 
-![all envs](assets/7.png)
+![All environments running](assets/7.png)
 
-| Environment | Namespace | Replicas |
+| Environment | Namespace | Replicas | Image |
+|---|---|---|---|
+| Dev | `webapp-dev` | 1 | `nginx:1.25` |
+| Staging | `webapp-staging` | 2 | `nginx:1.25.5` |
+| Prod | `webapp-prod` | 3 | `nginx:1.25.5` |
+| QA | `webapp-qa` | 2 | `nginx:1.25` |
+
+**Result:** Every environment runs the same application from the same base, but with its own replica count. The pods are spread across both worker nodes.
+
+---
+
+## Task 8: Inspecting the Prod Patch
+
+The prod overlay uses a small patch file that changes only the CPU and memory resources of the NGINX container. It also adds a "production" annotation.
+
+![Prod patch and render](assets/8.png)
+
+**1. Were the base values merged or replaced?**
+They were **merged**. Kustomize found the container by its name (`nginx`) and changed only the resource values. Everything else from the base, such as the image, port and volume mount, stayed the same.
+
+**2. Which environment owns the production resource policy?**
+Only the **prod overlay** owns it. The base and the other environments are not affected.
+
+**3. Why is a patch better than copying the Deployment file?**
+A copied file does not follow later changes to the base. If someone adds a new port or a health check to the base, they would have to remember to add it to the copy too. A patch contains only the difference, so it stays small, easy to review and always in sync with the base.
+
+---
+
+## Task 9: Creating a QA Overlay
+
+I created a new QA environment without copying any base files. It only contains the following four small files:
+
+| File | Purpose |
+|---|---|
+| `kustomization.yaml` | Points to the base and sets the namespace `webapp-qa`, the label `environment: qa`, 2 replicas and a new web page |
+| `namespace.yaml` | Creates the `webapp-qa` namespace |
+| `index.html` | A unique page: *"This is for the QA environment (owner: qa-team)"* |
+| `patch-annotation.yaml` | A JSON 6902 patch that adds the annotation `training.example.com/owner: qa-team` to the Deployment |
+
+Before applying, I checked the rendered output to make sure the annotation was there. Then I ran the diff, applied the overlay and verified the Deployment.
+
+![QA render and diff](assets/9.png)
+
+![QA deployment](assets/9.1.png)
+
+**Result:** The QA Deployment runs 2 replicas in `webapp-qa`, has the `environment: qa` label, shows the QA page and carries the `owner: qa-team` annotation.
+
+### Strategic Merge Patch vs JSON 6902 Patch
+
+| | Strategic Merge Patch (used in prod) | JSON 6902 Patch (used in QA) |
 |---|---|---|
-| dev | webapp-dev | 1 |
-| staging | webapp-staging | 2 |
-| prod | webapp-prod | 3 |
+| What it looks like | A small piece of a normal Kubernetes file | A list of steps, each with an action, a path and a value |
+| How it finds the target | From the kind and name written inside the patch | The target must be given in the kustomization file |
+| How it handles lists | Matches list items by key, for example by container name | Points to an exact position in the file |
+| Best used for | Changing or adding fields in a familiar layout | Exact actions such as add, remove or replace on one field |
+
+The base Deployment had no annotations, so the JSON patch added the whole annotations section. If annotations already existed, it would be safer to add only the single owner key so that the other annotations are not overwritten.
 
 ---
 
-### Task 8: Inspect the prod patch
+## Challenge: Using `namePrefix` in a Sandbox Overlay
 
-```bash
-cat examples/webapp/overlays/prod/patch-resources.yaml
-kubectl kustomize examples/webapp/overlays/prod
-```
+I created a sandbox overlay that adds the prefix `sandbox-` to resource names. Before rendering, I wrote down what I expected to change. Then I compared my prediction with the real output.
 
-![prod patch](assets/8.png)
-
-1. **Deleted or merged?** Merged. The strategic merge patch matched the container by `name: nginx` and replaced only the `resources` values. The image, ports and volumeMounts from the base were kept.
-2. **Who owns the production policy?** The prod overlay (`overlays/prod/patch-resources.yaml`). The base and other environments are untouched.
-3. **Why patch instead of copy?** A copy drifts: every later base change (new port, probe, image) would have to be repeated by hand in `prod/`. A patch states only the difference, so it stays small, reviewable and in sync with the base.
-
----
-
-### Task 9: QA overlay
-
-```bash
-kubectl kustomize examples/webapp/overlays/qa | grep -B2 -A2 owner
-kubectl diff -k examples/webapp/overlays/qa || true
-kubectl apply -k examples/webapp/overlays/qa
-kubectl get deployment webapp -n webapp-qa -o yaml
-```
-
-![qa render](assets/9.png)
-![qa deployment](assets/9.1.png)
-
-#### Strategic merge patch vs JSON 6902 patch
-
-| | Strategic merge (prod) | JSON 6902 (qa) |
+| Object or reference | My prediction | Actual result |
 |---|---|---|
-| Format | A partial Kubernetes object | A list of `op` / `path` / `value` operations |
-| Target | Found from the patch's own `kind` + `metadata.name` | Must be given explicitly with `target:` |
-| Lists | Merged by key (e.g. container `name`) | Addressed by index/path (`/spec/.../0/...`) |
-| Best for | Changing or adding fields in a familiar shape | Exact operations: add, remove, replace, test a single path |
+| Deployment name | `sandbox-webapp` | `sandbox-webapp` ✔ |
+| Service name | `sandbox-webapp` | `sandbox-webapp` ✔ |
+| ConfigMap name | `sandbox-web-content-<hash>` | `sandbox-web-content-bf64f96mh8` ✔ |
+| ConfigMap name used inside the Deployment | Updated to the new name | Updated ✔ |
+| Namespace | Not changed | `webapp-sandbox` ✔ |
+| Container name and volume name | Not changed | Not changed ✔ |
+| Labels and Service selector | Not changed | Not changed ✔ |
 
-The base Deployment has no annotations, so the JSON patch adds the whole `/metadata/annotations` map. If annotations already existed, the safer path would be `/metadata/annotations/training.example.com~1owner` (`~1` escapes `/`).
-
----
-
-### Challenge: `namePrefix` in a sandbox overlay
-
-`overlays/sandbox/kustomization.yaml` adds `namePrefix: sandbox-`.
-
-| Object / reference | Prediction | Actual |
-|---|---|---|
-| Deployment name | `sandbox-webapp` | `sandbox-webapp` |
-| Service name | `sandbox-webapp` | `sandbox-webapp` |
-| ConfigMap name | `sandbox-web-content-<hash>` | `sandbox-web-content-bf64f96mh8` |
-| Deployment volume `configMap.name` | rewritten to the prefixed name | rewritten |
-| Namespace object | not prefixed | `webapp-sandbox` (unchanged) |
-| Volume name / container name | unchanged (not resource names) | unchanged |
-| Service selector / labels | unchanged (labels are not names) | unchanged |
-
-Kustomize knows which fields hold references to other resources, so renaming the ConfigMap also updated the Deployment that mounts it.
+**What I learned:** Kustomize knows which fields refer to other resources. When it renamed the ConfigMap, it also updated the Deployment that uses it, so nothing broke.
 
 ---
 
-## Reflection: a Kustomize mistake and how the rendered output exposed it
+## Reflection: A Mistake and How the Rendered Output Helped
 
-My first dev overlay had `resources: ../../base` but **no `configMapGenerator` with `behavior: replace`**. I assumed that putting an `index.html` in `overlays/dev/` would be enough. When I curled the dev service, it returned the base page. Running `kubectl kustomize examples/webapp/overlays/dev | grep -A2 'index.html'` showed the cause: the ConfigMap still held `This is for the base environment`, and editing `dev/index.html` left the hash unchanged. Adding the generator with `behavior: replace` fixed it. Since then I render and grep the output before applying.
+In my first try at the dev overlay, I placed a new `index.html` inside the dev folder. I thought that would be enough to change the page. But I forgot to tell Kustomize to **replace** the base ConfigMap with this new file.
+
+When I rendered the dev overlay, the output showed the problem clearly. The ConfigMap still said *"This is for the base environment"*, and the hash stayed the same (`web-content-t9bf58c444`).
+
+![Dev render still showing the base page](assets/dev_kustomize.png)
+
+After applying, the ConfigMap and the pod stayed **unchanged**, which confirmed that my new page was being ignored.
+
+![ConfigMap unchanged after apply](assets/image.png)
+
+To fix it, I added a ConfigMap generator to the dev overlay with the **replace** behaviour. After that, the render showed the development page and a new hash. From this mistake I learned to **always render and check the output before applying**.
+
+---
 
 ## Conclusion
 
-One base and several small overlays deployed four environments with no copied Deployment or Service. The differences between environments are easy to read and review. The ConfigMap hash suffix turns a content change into a rollout, and the render → diff → apply → verify workflow catches mistakes before they reach the cluster.
+In this practical, I used one base and a few small overlays to deploy the same web application to dev, staging, prod and qa without copying the Deployment or Service files. Each overlay contained only what was different, so the changes were easy to read and review. I saw how the ConfigMap hash turns a simple content change into an automatic rollout. I also learned when to use a strategic merge patch and when to use a JSON 6902 patch. Following the **render - diff - apply - verify** workflow helped me find mistakes before they reached the cluster.
