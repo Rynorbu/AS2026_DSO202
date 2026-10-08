@@ -1,5 +1,5 @@
 # =============================================================================
-# File        : manifests/06-deployment-backend.yaml
+# File        : backend/deployment.yaml
 # Assignment  : DSO202 Assignment 2
 # Purpose     : The backend REST API that handles requests from the frontend
 #               and reads/writes data to the database.
@@ -14,7 +14,7 @@
 #               if the database Pod is restarted — that is the benefit
 #               of the StatefulSet's stable DNS.
 #
-# Apply with  : kubectl apply -f manifests/06-deployment-backend.yaml
+# Apply with  : kubectl apply -f backend/deployment.yaml
 # =============================================================================
 
 apiVersion: apps/v1
@@ -52,7 +52,7 @@ spec:
               protocol: TCP
 
           env:
-            # All values come from ConfigMap (file 03) and Secret (file 02).
+            # All values come from ConfigMap (configmap.yaml) and Secret (secret.yaml).
             # Nothing is hardcoded here — if we need to change the database
             # host or port, we update the ConfigMap, not this file.
             - name: DB_HOST

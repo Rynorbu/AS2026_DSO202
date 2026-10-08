@@ -1,0 +1,124 @@
+# =============================================================================
+# File        : traefik/traefik.yaml
+# Assignment  : DSO202 Assignment 2
+# Purpose     : Install the Traefik v3.1 Ingress Controller without Helm.
+#
+#   IngressClass "traefik"   -> Ingresses with ingressClassName: traefik are
+#       handled by this controller.
+#   Deployment               -> the controller itself. Two providers:
+#       kubernetesingress  = reads standard networking.k8s.io/v1 Ingress
+#       kubernetescrd      = reads Traefik CRDs (Middleware) used through
+#                            Ingress annotations
+#   hostPort 80/443          -> kind maps host 127.0.0.1:80/443 into the
+#       control-plane container (see kind-cluster.yaml extraPortMappings), so
+#       the Traefik pod must run on the control-plane node and bind those
+#       ports there. This is why we need nodeSelector + toleration.
+#
+# Prerequisites (apply first):
+#   kubectl apply -f traefik/rbac.yaml      (ServiceAccount "traefik" + permissions)
+#   Traefik CRDs (Middleware etc.):
+#   kubectl apply -f https://raw.githubusercontent.com/traefik/traefik/v3.1/docs/content/reference/dynamic-configuration/kubernetes-crd-definition-v1.yml
+#
+# Apply with  : kubectl apply -f traefik/traefik.yaml
+# =============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: traefik
+---
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: traefik
+  annotations:
+    ingressclass.kubernetes.io/is-default-class: "true"
+spec:
+  controller: traefik.io/ingress-controller
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: traefik
+  namespace: traefik
+  labels:
+    app: traefik
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: traefik
+  template:
+    metadata:
+      labels:
+        app: traefik
+    spec:
+      serviceAccountName: traefik
+
+      # kind only publishes host ports 80/443 on the control-plane node.
+      # (The nginx controller failed earlier with "didn't match Pod's node
+      # affinity/selector" because it expects an ingress-ready=true label.)
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: ""
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+
+      containers:
+        - name: traefik
+          image: traefik:v3.1
+          args:
+            - --providers.kubernetesingress=true
+            - --providers.kubernetesingress.ingressclass=traefik
+            # Shown in the ADDRESS column of 'kubectl get ingress'
+            - --providers.kubernetesingress.ingressendpoint.ip=127.0.0.1
+            - --providers.kubernetescrd=true
+            - --entrypoints.web.address=:8000
+            - --entrypoints.websecure.address=:8443
+            - --api.dashboard=true
+            - --api.insecure=true          # dashboard on :8080 (lab use only)
+            - --ping=true
+            - --log.level=INFO
+            - --accesslog=true
+          ports:
+            - name: web
+              containerPort: 8000
+              hostPort: 80
+            - name: websecure
+              containerPort: 8443
+              hostPort: 443
+            - name: dashboard
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "64Mi"
+            limits:
+              cpu: "300m"
+              memory: "128Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: traefik
+  namespace: traefik
+spec:
+  type: ClusterIP
+  selector:
+    app: traefik
+  ports:
+    - name: web
+      port: 80
+      targetPort: web
+    - name: websecure
+      port: 443
+      targetPort: websecure
+    - name: dashboard
+      port: 8080
+      targetPort: dashboard

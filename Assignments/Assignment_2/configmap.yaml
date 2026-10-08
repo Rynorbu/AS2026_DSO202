@@ -3,14 +3,26 @@ kind: ConfigMap
 metadata:
   name: app-config
   namespace: dso202-assignment-02
+  labels:
+    dso202/assignment: "02"
+    dso202/managed-by: declarative
 data:
-  # Stable network identity of the first StatefulSet pod: <pod>.<headless-svc>
-  DB_HOST: "db-0.db-svc"
+  # Stable network identity of the first StatefulSet pod:
+  #   <pod-name>.<headless-service-name>  ->  db-0.db-headless
+  # (full FQDN: db-0.db-headless.dso202-assignment-02.svc.cluster.local)
+  DB_HOST: "db-0.db-headless"
   DB_PORT: "5432"
   DB_NAME: "tasksdb"
   APP_PORT: "8080"
   CORS_ORIGIN: "*"
-  BACKEND_URL: /api #"http://backend-svc:8080"
+
+  # The browser calls ${BACKEND_URL}/api/tasks -> "./api/tasks", a relative URL
+  # that resolves to the same host AND port the page was loaded from
+  # (https://app.dso202.local or https://app.dso202.local:8443 via port-forward).
+  # The Ingress routes /api/* on that host to backend-svc, so the frontend and
+  # the API share one origin (no CORS, one certificate exception).
+  # Not empty: the frontend entrypoint replaces an empty value with localhost:8080.
+  BACKEND_URL: "."
 
   POSTGRES_DB: "tasksdb"
   # Data goes in a sub-folder so the volume root's lost+found doesn't break initdb

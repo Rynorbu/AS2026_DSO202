@@ -1,5 +1,5 @@
 # =============================================================================
-# File        : manifests/04-service-db-headless.yaml
+# File        : db/service.yaml
 # Assignment  : DSO202 Assignment 2
 # Purpose     : A headless Service for the database StatefulSet.
 #
@@ -17,10 +17,10 @@
 #                   pod   service     namespace
 #
 #               IMPORTANT: This file MUST be applied BEFORE the StatefulSet
-#               (file 05). The StatefulSet looks for this Service by name
+#               (db/statefulset.yaml). The StatefulSet looks for this Service by name
 #               when it starts. If it does not exist, DNS names will not work.
 #
-# Apply with  : kubectl apply -f manifests/04-service-db-headless.yaml
+# Apply with  : kubectl apply -f db/service.yaml
 # Verify      : kubectl get service db-headless -n dso202-assignment-02
 #               The CLUSTER-IP column must show "None"
 # =============================================================================
@@ -29,7 +29,7 @@ apiVersion: v1
 kind: Service
 metadata:
   # This name must EXACTLY match the 'serviceName' field in the StatefulSet
-  # (file 05). If they do not match, the per-Pod DNS names will not work.
+  # (db/statefulset.yaml). If they do not match, the per-Pod DNS names will not work.
   name: db-headless
   namespace: dso202-assignment-02
   labels:

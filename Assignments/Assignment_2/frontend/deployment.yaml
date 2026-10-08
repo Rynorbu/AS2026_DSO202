@@ -1,5 +1,5 @@
 # =============================================================================
-# File        : manifests/08-deployment-frontend.yaml
+# File        : frontend/deployment.yaml
 # Assignment  : DSO202 Assignment 2
 # Purpose     : The frontend nginx web server that serves the UI to the browser.
 #
@@ -9,11 +9,11 @@
 #
 #               In Assignment 1, this was exposed directly via NodePort
 #               (port 30080). In Assignment 2, the frontend Service is
-#               ClusterIP and the Ingress (file 10) handles external access.
-#               The browser goes to http://tasktracker.local instead of
+#               ClusterIP and the Ingress (Ingress/ingress-https.yaml) handles external access.
+#               The browser goes to https://app.dso202.local instead of
 #               http://localhost:30080.
 #
-# Apply with  : kubectl apply -f manifests/08-deployment-frontend.yaml
+# Apply with  : kubectl apply -f frontend/deployment.yaml
 # =============================================================================
 
 apiVersion: apps/v1

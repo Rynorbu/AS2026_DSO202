@@ -1,6 +1,20 @@
-# Apply with  : kubectl apply -f manifests/05-statefulset-db.yaml
+# =============================================================================
+# File        : db/statefulset.yaml
+# Assignment  : DSO202 Assignment 2
+# Purpose     : PostgreSQL as a StatefulSet (replaces the Assignment 1
+#               Deployment + standalone PVC).
+#   - Stable identity : pods are named db-0, db-1, ... and get DNS records
+#                       db-N.db-headless through the headless Service.
+#   - Ordered         : OrderedReady -> db-1 starts only after db-0 is Ready;
+#                       scale-down removes the highest ordinal first.
+#   - Storage         : volumeClaimTemplates create one PVC per pod
+#                       (db-storage-db-0, db-storage-db-1, ...).
+#
+# Apply with  : kubectl apply -f db/service.yaml   (headless Service FIRST)
+#               kubectl apply -f db/statefulset.yaml
 # Connect     : kubectl exec -it db-0 -n dso202-assignment-02 -- \
-#                 psql -U taskuser -d taskdb
+#                 psql -U taskuser -d tasksdb
+# =============================================================================
 
 apiVersion: apps/v1
 kind: StatefulSet
@@ -66,6 +80,11 @@ spec:
                 secretKeyRef:
                   name: app-secret
                   key: POSTGRES_PASSWORD
+            - name: PGDATA
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: PGDATA
 
           volumeMounts:
             - name: db-storage

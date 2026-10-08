@@ -1,19 +1,36 @@
+# =============================================================================
+# File        : Ingress/middleware.yaml
+# Assignment  : DSO202 Assignment 2
+# Purpose     : Traefik Middlewares (CRD). A plain Kubernetes Ingress has no
+#               field for "redirect to HTTPS" or "add security headers", so
+#               these controller-specific features are attached to an Ingress
+#               with the annotation:
+#                 traefik.ingress.kubernetes.io/router.middlewares:
+#                   <namespace>-<middleware-name>@kubernetescrd
+#
+# Apply with  : kubectl apply -f Ingress/middleware.yaml
+# =============================================================================
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
-  name: strip-app-prefix
+  name: redirect-https
   namespace: dso202-assignment-02
 spec:
-  stripPrefix:
-    prefixes:
-      - /app
+  # http://... -> 301 -> https://...
+  redirectScheme:
+    scheme: https
+    permanent: true
 ---
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
-  name: strip-api-prefix
+  name: security-headers
   namespace: dso202-assignment-02
 spec:
-  stripPrefix:
-    prefixes:
-      - /api
+  headers:
+    frameDeny: true                 # X-Frame-Options: DENY
+    contentTypeNosniff: true        # X-Content-Type-Options: nosniff
+    referrerPolicy: no-referrer
+    stsSeconds: 31536000            # Strict-Transport-Security
+    customResponseHeaders:
+      X-Served-By: traefik-dso202

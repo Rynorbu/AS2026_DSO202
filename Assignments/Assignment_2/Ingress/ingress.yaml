@@ -1,22 +1,90 @@
+# =============================================================================
+# File        : Ingress/ingress.yaml
+# Assignment  : DSO202 Assignment 2
+# Purpose     : Two Ingress objects for the Traefik controller.
+#
+#   dso202-ingress       (websecure / 443)
+#     - TLS termination with the self-signed secret dso202-tls
+#     - Name-based virtual hosting:
+#         app.dso202.local  /api -> backend-svc   (path-based routing)
+#                           /    -> frontend-svc
+#         api.dso202.local  /    -> backend-svc
+#     - security-headers Middleware via annotation
+#
+#   dso202-ingress-http  (web / 80)
+#     - Same hosts, but every request is redirected to HTTPS by the
+#       redirect-https Middleware (annotation).
+#
+# Prerequisites: traefik/traefik.yaml, Ingress/middleware.yaml and
+#   kubectl create secret tls dso202-tls --cert=tls.crt --key=tls.key -n dso202-assignment-02
+#
+# Apply with  : kubectl apply -f Ingress/ingress.yaml
+# =============================================================================
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: dso202-ingress
   namespace: dso202-assignment-02
+  labels:
+    dso202/assignment: "02"
+    dso202/managed-by: declarative
   annotations:
-    # Traefik-specific annotations
+    # Traefik-specific annotations (controller-specific features)
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
     traefik.ingress.kubernetes.io/router.tls: "true"
-    # traefik.ingress.kubernetes.io/router.priority: "10"   # optional: rule priority
+    traefik.ingress.kubernetes.io/router.middlewares: dso202-assignment-02-security-headers@kubernetescrd
 spec:
   ingressClassName: traefik
-  tls:                               # TLS termination at Traefik
+  tls:                                # TLS termination at Traefik
     - hosts:
         - app.dso202.local
         - api.dso202.local
-      secretName: dso202-tls         # created in README step 6
+      secretName: dso202-tls
   rules:
     # Name-based virtual hosting: same IP/port, routed by Host header
+    - host: app.dso202.local
+      http:
+        paths:
+          # Basic path-based routing: the longer /api rule wins over /
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: backend-svc
+                port:
+                  number: 8080
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend-svc
+                port:
+                  number: 8080
+    - host: api.dso202.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: backend-svc
+                port:
+                  number: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: dso202-ingress-http
+  namespace: dso202-assignment-02
+  labels:
+    dso202/assignment: "02"
+    dso202/managed-by: declarative
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    traefik.ingress.kubernetes.io/router.middlewares: dso202-assignment-02-redirect-https@kubernetescrd
+spec:
+  ingressClassName: traefik
+  rules:
     - host: app.dso202.local
       http:
         paths:

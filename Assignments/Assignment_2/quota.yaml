@@ -1,5 +1,5 @@
 # =============================================================================
-# File        : manifests/01-quota-and-limits.yaml
+# File        : quota.yaml
 # Assignment  : DSO202 Assignment 2
 # Purpose     : ResourceQuota sets the MAXIMUM resources the whole namespace
 #               can use in total. LimitRange sets the default resources for
@@ -9,7 +9,7 @@
 #                 ResourceQuota = the budget for the whole class
 #                 LimitRange    = the default spending limit per student
 #
-# Apply with  : kubectl apply -f manifests/01-quota-and-limits.yaml
+# Apply with  : kubectl apply -f quota.yaml
 # =============================================================================
 
 apiVersion: v1

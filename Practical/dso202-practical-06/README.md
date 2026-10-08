@@ -60,8 +60,6 @@ I have installed Helm 4 already on my local machine. Just checked the version.
 
 ![alt text](assets/helm_list.png)
 
-### Create the lab folder
-
 ## Stage 1: Use a published chart (podinfo)
 
 ### Add the repo and update it
