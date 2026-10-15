@@ -1,22 +1,3 @@
-# =============================================================================
-# File        : backend/deployment.yaml
-# Assignment  : DSO202 Assignment 2
-# Purpose     : The backend REST API that handles requests from the frontend
-#               and reads/writes data to the database.
-#
-#               A Deployment is correct here because the backend is STATELESS.
-#               It does not own any data. Any backend Pod can handle any
-#               request — they are all identical. If one dies, a new one
-#               takes its place with no data loss.
-#
-#               The backend connects to the database using the headless
-#               Service name "db-headless". This name never changes even
-#               if the database Pod is restarted — that is the benefit
-#               of the StatefulSet's stable DNS.
-#
-# Apply with  : kubectl apply -f backend/deployment.yaml
-# =============================================================================
-
 apiVersion: apps/v1
 kind: Deployment
 metadata:

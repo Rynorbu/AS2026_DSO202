@@ -1,29 +1,31 @@
-# DSO202 Assignment 2: StatefulSets and Ingress (Traefik) for the Three-Tier Task Tracker
+# DSO202 Assignment 2: StatefulSets and Ingress (Traefik) for the Task Tracker
 
 ## Overview
 
-In Assignment 1, I deployed the three-tier Task Tracker (frontend, backend, PostgreSQL) using only Deployments, a standalone PVC and a NodePort Service. In this assignment, I re-implemented the same application using the concepts from Unit 2:
+In Assignment 1, I deployed my three-tier Task Tracker (frontend, backend and PostgreSQL) using Deployments, a separate PVC and a NodePort Service. In this assignment, I deployed the same app again using what we learned in Unit 2:
 
-- **StatefulSets** for the database tier, with a **headless Service** and **volume claim templates**, which give it a stable network identity, stable storage and ordered deployment and scaling.
-- An **Ingress** with the **Traefik Ingress Controller** as the single entry point to the application. It uses routing rules, TLS termination, name-based virtual hosting and Traefik-specific annotations.
+- **StatefulSet** for the database, with a **headless Service** and **volumeClaimTemplates**. This gives the database a fixed name, its own storage, and ordered start-up and scaling.
+- **Ingress** with the **Traefik Ingress Controller** as the single entry point to the app. I used path-based routing, name-based virtual hosting and Traefik annotations.
 
-The same container images from Assignment 1 are reused without any change:
+I reused the same images from Assignment 1 without changing them:
 
-| Tier | Image | Port | Kubernetes object (A1) | Kubernetes object (A2) |
+| Tier | Image | Port | Assignment 1 | Assignment 2 |
 |---|---|---|---|---|
-| Frontend | `rynorbu11/dso202-frontend:1.0` | 8080 | Deployment + **NodePort** Service | Deployment + **ClusterIP** Service, exposed through **Ingress** |
-| Backend | `rynorbu11/dso202-backend:1.0` | 8080 | Deployment + ClusterIP Service | Deployment + ClusterIP Service, exposed through **Ingress** |
-| Database | `rynorbu11/dso202-db:1.0` | 5432 | Deployment + standalone PVC + headless Service | **StatefulSet** + **volumeClaimTemplates** + **headless Service** |
+| Frontend | `rynorbu11/dso202-frontend:1.0` | 8080 | Deployment + **NodePort** Service | Deployment + **ClusterIP** Service, reached through **Ingress** |
+| Backend | `rynorbu11/dso202-backend:1.0` | 8080 | Deployment + ClusterIP Service | Deployment + ClusterIP Service, reached through **Ingress** |
+| Database | `rynorbu11/dso202-db:1.0` | 5432 | Deployment + separate PVC + headless Service | **StatefulSet** + **volumeClaimTemplates** + **headless Service** |
 
-### Implementation notes
+The app is available at **http://ranjung.com** (full app) and **http://api.ranjung.com** (API only).
+
+---
 
 ## Task 1: Cluster Setup
 
-The Ingress Controller must be reachable from my Windows browser. A plain `kind create cluster` does not publish any ports, so I created the cluster from `kind-cluster.yaml`. Its `extraPortMappings` publish ports **80** and **443** of the control-plane node container on `127.0.0.1`:
+I needed to open the app from my Windows browser, so the Ingress Controller had to be reachable from my computer. A normal `kind create cluster` does not open any ports, so I created my cluster from `kind-cluster.yaml`. The `extraPortMappings` in that file open port **80** of the control-plane node on `127.0.0.1`.
 
 ![Cluster info, nodes, storage class and port mappings](screesnot/01-cluster.png)
 
-> The cluster has three Ready nodes (`control-plane`, `worker-node-1`, `worker-node-2`) running Kubernetes v1.36.1. The `standard (default)` StorageClass (`rancher.io/local-path`, `WaitForFirstConsumer`) will dynamically provision the StatefulSet volumes. `docker ps` confirms that `ingress-control-plane` publishes `127.0.0.1:80->80/tcp` and `127.0.0.1:443->443/tcp`, which are the ports Traefik uses.
+My cluster has three Ready nodes (`control-plane`, `worker-node-1`, `worker-node-2`) running Kubernetes v1.36.1. The `standard` StorageClass will create the database volumes automatically. `docker ps` shows that `ingress-control-plane` publishes `127.0.0.1:80 -> 80/tcp`, which is the port Traefik listens on.
 
 ---
 
@@ -31,239 +33,262 @@ The Ingress Controller must be reachable from my Windows browser. A plain `kind 
 
 ![Namespace, quota, limit range, secret and configmap](screesnot/02-namespace-config.png)
 
-> The namespace `dso202-assignment-02` is Active. The ResourceQuota `dso202-a2-quota` limits the namespace to 10 pods, 1 CPU / 1Gi memory in requests, 2 CPU / 2Gi memory in limits, 6 PVCs and 10Gi of storage. The LimitRange gives default requests and limits to any container that does not set its own. The Secret `app-secret` holds 4 credential keys and the ConfigMap `app-config` holds 8 configuration keys.
+The namespace `dso202-assignment-02` is Active. The ResourceQuota limits the namespace to 10 pods, 6 PVCs and 10Gi of storage, and also limits CPU and memory. The LimitRange gives default CPU and memory values to any container that does not set its own. The Secret `app-secret` stores the database username and password, and the ConfigMap `app-config` stores the other settings.
 
-Two ConfigMap values changed from Assignment 1 because of the Unit 2 concepts:
+I changed two ConfigMap values from Assignment 1:
 
-- **`DB_HOST`** now points to the **stable network identity** of the StatefulSet pod (`<pod>.<headless-service>`) instead of a plain Service name.
-- **`BACKEND_URL: "."`** makes the frontend call the relative URL `./api/tasks`. The Ingress routes `/api` on the same hostname to the backend, so the frontend and the API share one origin (no CORS, one certificate). It also keeps working when the app is reached through `kubectl port-forward` on a different port.
+- **`DB_HOST: "db-0.db-headless"`**: the backend now connects to the fixed DNS name of the database pod, instead of a normal Service name.
+- **`BACKEND_URL: "."`**: the frontend calls `./api/tasks` on the same hostname it was loaded from. The Ingress sends `/api` to the backend, so the frontend and backend share one address and I don't need CORS.
 
 ---
 
-## Task 3: Database Tier as a StatefulSet
+## Task 3: Database as a StatefulSet
 
-### 3.1 Why a StatefulSet?
+### 3.1 Why I used a StatefulSet
 
-In Assignment 1 the database ran as a Deployment. That worked for one replica, but a Deployment treats all pods as interchangeable:
+In Assignment 1 my database was a Deployment. It worked with one pod, but a Deployment treats all its pods as the same:
 
 | | Deployment (A1) | StatefulSet (A2) |
 |---|---|---|
-| Pod name | random, e.g. `db-deployment-7d9f8-xk2p` | fixed ordinal, `db-0`, `db-1`, … |
-| DNS | only the Service name | a DNS record for every pod: `db-0.db-headless` |
-| Storage | one PVC shared by all replicas (created separately) | one PVC **per pod**, created from `volumeClaimTemplates` |
-| Start / stop order | all at once, any order | ordered: `db-0` → `db-1` → `db-2`, reverse on scale-down |
-| After a restart | new name, may attach to any PVC | **same name, same PVC** |
+| Pod name | random, e.g. `db-deployment-7d9f8-xk2p` | fixed, `db-0`, `db-1`, … |
+| DNS | only the Service name | every pod gets its own name: `db-0.db-headless` |
+| Storage | one PVC that I created by hand | one PVC **per pod**, created automatically |
+| Start / stop order | all at once | in order: `db-0` → `db-1` → `db-2`, reverse when scaling down |
+| After a restart | new name | **same name, same PVC** |
 
-A database is the typical use case for a StatefulSet. Each instance owns its data, other components must find a specific instance by a predictable name, and instances should start and stop in a controlled order. The frontend and backend stay as Deployments because they are **stateless**: any replica can serve any request.
+A database keeps data, and the backend needs to find it by a name that doesn't change, so a StatefulSet is the right choice. The frontend and backend don't keep any data, so I left them as Deployments.
 
 ### 3.2 Headless Service
 
-The headless Service is applied **before** the StatefulSet, because the StatefulSet's `serviceName: db-headless` is what creates the per-pod DNS records.
+I applied the headless Service **before** the StatefulSet. The StatefulSet uses `serviceName: db-headless` to give each pod its own DNS name.
 
 ![Headless service with CLUSTER-IP None](screesnot/04-headless-svc.png)
 
-> `CLUSTER-IP` is **None**, so Kubernetes does not allocate a virtual IP or load-balance. A DNS query returns the IPs of the pods directly.
+`CLUSTER-IP` is **None**. This means Kubernetes doesn't give the Service its own IP. A DNS lookup returns the pod's IP directly.
 
-### 3.3 StatefulSet with volume claim templates
+### 3.3 StatefulSet with volumeClaimTemplates
 
-Key parts of `db/statefulset.yaml`:
-
-The readiness probe is important for ordered deployment. With `OrderedReady`, the controller waits until a pod is **Ready**, not just Running, before creating the next one. Without the probe, "Running" would count as "Ready" even while Postgres is still initialising.
+The readiness probe matters for ordered start-up. With `OrderedReady`, Kubernetes waits until a pod is **Ready** before it creates the next one. Without the probe, a pod would count as Ready as soon as it was Running, even if Postgres was still starting.
 
 ![StatefulSet rollout status](screesnot/rollout.png)
 
 ![Watching db-0 being created](screesnot/rollout_live.png)
 
-> The pod `db-0` goes from `Pending` (waiting for its PVC to be provisioned) to `ContainerCreating` to `Running 0/1`, and becomes `1/1` only after the readiness probe (`pg_isready`) succeeds.
+The pod `db-0` went from `Pending` (waiting for its disk) to `ContainerCreating`, then `Running 0/1`. It became `1/1` only after `pg_isready` succeeded.
 
 ![StatefulSet, pod db-0 and PVC db-storage-db-0](screesnot/05-statefulset-ready.png)
 
-> The pod is named **`db-0`**, not a random hash. The PVC **`db-storage-db-0`** (`<template-name>-<pod-name>`) was created automatically from the volume claim template. I did not write a separate PVC manifest as in Assignment 1. The local-path provisioner dynamically created a 1Gi PersistentVolume and bound it to the claim.
+The pod is called **`db-0`**, not a random name. The PVC **`db-storage-db-0`** was created automatically from the template, so I didn't have to write a PVC file like in Assignment 1.
 
 ![Describe statefulset: volume claims and events](screesnot/06-describe-statefulset.png)
 
-> The `Volume Claims` section shows the template (`db-storage`, 1Gi, ReadWriteOnce). The events show the order in which the StatefulSet controller works: first **`Create Claim db-storage-db-0`**, then **`Create Pod db-0`**. The storage exists before the pod starts.
+The events show that Kubernetes first ran **`Create Claim db-storage-db-0`** and then **`Create Pod db-0`**, so the disk was ready before the pod started.
 
 ![Postgres init log and seed data](screesnot/07-db-seed-data.png)
 
-> PostgreSQL 17.11 initialised the empty volume, ran `01-init.sql` and is ready to accept connections. The `tasks` table contains the 3 seed rows.
+PostgreSQL started on the empty disk, ran `01-init.sql`, and the `tasks` table has the 3 starting rows.
 
-### 3.4 Stable network identity 
+### 3.4 Stable network identity
 
 ![DNS lookup of the headless service and db-0](screesnot/08-dns-stable-identity.png)
 
-> Both `db-headless.dso202-assignment-02.svc.cluster.local` and `db-0.db-headless.dso202-assignment-02.svc.cluster.local` resolve **directly to the pod IP `10.244.1.3`**, which matches the IP of `db-0` in `kubectl get pod -o wide`. CoreDNS (`10.96.0.10`) answers with the pod IP instead of a virtual ClusterIP because the Service is headless. The name `db-0.db-headless` belongs to this one pod for its whole life, which is why the backend can use it as `DB_HOST`.
+`db-0.db-headless` resolves **directly to the pod IP `10.244.1.3`**, the same IP shown by `kubectl get pod -o wide`. The name `db-0.db-headless` always belongs to this pod, so I can safely use it as `DB_HOST` in the backend.
 
 ---
 
-## Task 4: Backend and Frontend Tiers
+## Task 4: Backend and Frontend
 
-Both tiers are stateless and remain **Deployments**. Unlike Assignment 1, **both Services are now `ClusterIP`**. The frontend no longer needs a NodePort, because the Ingress is now the single entry point into the cluster.
+The frontend and backend are still **Deployments** because they don't store data. The difference from Assignment 1 is that **both Services are now `ClusterIP`**. I don't need a NodePort any more, because the Ingress is the only way in.
 
 ![All application pods and services](screesnot/09-app-running.png)
 
-> All three tiers are running and spread across the worker nodes. `backend-svc` and `frontend-svc` are `ClusterIP`, so neither is reachable from outside the cluster without the Ingress. `db-headless` has `CLUSTER-IP None`.
-
+All three pods are `1/1 Running` on the **worker nodes**, not on the control-plane: the frontend and backend are on `worker-node-1`, and `db-0` is on `worker-node-2`. `backend-svc` and `frontend-svc` are `ClusterIP`, so they can't be reached from outside the cluster without the Ingress. `db-headless` has `CLUSTER-IP None`.
 
 ![Backend connected to the database](screesnot/10-backend-connected.png)
 
-> The backend log shows `[db] connected` and `[server] listening on :8080`. This proves the backend reached PostgreSQL through the stable DNS name `db-0.db-headless` from the ConfigMap.
+The backend log shows `[db] connected` and `[server] listening on :8080`. This shows the backend found the database using the name `db-0.db-headless`.
 
 ---
 
 ## Task 5: Ingress Controller Setup
 
-### 5.1 First attempt: NGINX Ingress Controller
+### 5.1 First try: NGINX Ingress Controller
 
-I first tried to install the NGINX Ingress Controller with its kind manifest, but the controller pod never started:
+I first tried the NGINX Ingress Controller, but its pod never started:
 
 ![NGINX controller: FailedScheduling](screesnot/assets/error.png)
 
-> **FailedScheduling: didn't match Pod's node affinity/selector.** The kind version of the NGINX manifest only schedules the controller on a node labelled `ingress-ready=true`, and my cluster's nodes did not have that label.
+The first error was **FailedScheduling: didn't match Pod's node affinity/selector**. The kind version of NGINX only runs on a node with the label `ingress-ready=true`, and my nodes didn't have it.
 
 ![NGINX controller: webhook secret missing](screesnot/assets/error2.png)
 
-> After the pod was scheduled, it failed with **`MountVolume.SetUp failed for volume "webhook-cert": secret "ingress-nginx-admission" not found`**, because the admission webhook certificate job had not completed.
+After that, it failed with **`secret "ingress-nginx-admission" not found`**, because the admission webhook job hadn't finished.
 
-Because of these problems, I switched to **Traefik**. Traefik needs no admission webhook, can be installed with a few plain manifests, and supports both the standard Ingress API and its own CRDs (Middlewares) that can be attached through annotations.
+Because of these problems, I switched to **Traefik**. Traefik is easy to install with a few YAML files, and it can be configured through annotations.
 
 ### 5.2 Traefik Ingress Controller
 
-**Step 1: Install the Traefik CRDs.** These are needed for the `Middleware` objects used by the annotations in Task 7:
+**Step 1: Install the Traefik CRDs.** I need these for the `Middleware` object in Task 7.
 
 ![Traefik CRDs installed](screesnot/11-traefik-crds.png)
 
-**Step 2: Deploy the controller.** `traefik/rbac.yaml` gives the controller's ServiceAccount read access to Ingresses, Services, EndpointSlices, Secrets and Middlewares. `traefik/traefik.yaml` creates the IngressClass and the Traefik Deployment. The important part of the Deployment:
+**Step 2: Deploy the controller.** `traefik/rbac.yaml` gives Traefik permission to read Ingresses, Services and Middlewares. `traefik/traefik.yaml` creates the IngressClass and the Traefik Deployment.
 
-The `nodeSelector` and toleration solve the same problem that broke the NGINX install. I explicitly pin the controller to the control-plane node, which is the only node with ports 80/443 published by kind, and `hostPort` binds those ports on that node.
+The control-plane node is the only node where kind opens port 80 to my computer, so Traefik has to run there. I set this up in the Deployment with four settings:
+
+- **`nodeSelector: node-role.kubernetes.io/control-plane`** tells Kubernetes to put Traefik on the control-plane node.
+- **A toleration** lets it run there. By default, the control-plane node doesn't accept normal pods.
+- **`hostPort: 80`** binds port 80 directly on that node, so requests from my computer reach Traefik.
+- **`strategy: Recreate`** removes the old Traefik pod before starting a new one, because only one pod can use port 80 on the node.
+
+This is the same placement problem that broke my NGINX install, but this time I solved it myself.
 
 ![Traefik running on the control-plane node](screesnot/12-traefik-running.png)
 
-> The Traefik pod is `1/1 Running` on node **`control-plane`**. The IngressClass `traefik (default)` uses the controller `traefik.io/ingress-controller`. The logs show Traefik 3.1.7 starting both providers: `*ingress.Provider` (standard Ingress) and `*crd.Provider` (Traefik CRDs).
+The Traefik pod is `1/1 Running` on the **`control-plane`** node. Its Service has port `80` for web traffic and `8080` for the Traefik dashboard. The IngressClass `traefik` is marked as `(default)`, so my Ingress uses this controller.
+
+### 5.3 How the work is split between the nodes
+
+In my cluster, the **Ingress Controller runs on the control-plane node**, and the **application runs on the worker nodes**:
+
+| Node | What runs there | Its job |
+|---|---|---|
+| `control-plane` | Traefik (Ingress Controller) | Receives every request from my computer on port 80 and decides where it should go |
+| `worker-node-1` | frontend and backend pods | Serve the web page and handle the API requests |
+| `worker-node-2` | `db-0` (database) pod | Stores the tasks in PostgreSQL |
+
+So the control-plane node is only the **front door**. It accepts the traffic and passes it on, and the worker nodes do the actual work. This works because every pod can reach every other pod over the cluster network, whichever node it's on. Keeping my app off the control-plane also means the node that runs Kubernetes itself isn't busy serving my app. If I add more replicas later, Kubernetes can spread them across both workers.
 
 ---
 
-## Task 6: Ingress Resource Configuration
+## Task 6: Ingress Resource
 
-### 6.1 TLS certificate 
+### 6.1 The Ingress manifest
 
-I generated a self-signed certificate valid for both hostnames using a Subject Alternative Name, and stored it in a `kubernetes.io/tls` Secret:
+`Ingress/ingress.yaml` has one Ingress called `dso202-ingress`. It uses the `traefik` IngressClass and has two rules, one for each hostname:
 
-![TLS secret](screesnot/13-tls-cert.png)
+| Hostname | Path | Goes to |
+|---|---|---|
+| `ranjung.com` | `/api` | `backend-svc` (port 8080) |
+| `ranjung.com` | `/` | `frontend-svc` (port 8080) |
+| `api.ranjung.com` | `/` | `backend-svc` (port 8080) |
 
-> The secret `dso202-tls` is of type `kubernetes.io/tls` and contains `tls.crt` and `tls.key`. The Secret must be in the same namespace as the Ingress that references it.
+**How it works:**
 
-### 6.2 The Ingress manifest
-
-`Ingress/ingress.yaml` contains two Ingress objects. The main one (`dso202-ingress`) on the HTTPS entrypoint:
-
-The second one (`dso202-ingress-http`) uses the same hosts on the `web` (HTTP) entrypoint, with the `redirect-https` middleware.
-
-**How each feature works:**
-
-- **Basic routing rules (2.2.1.1):** On `app.dso202.local`, the request path decides the backend: `/api…` goes to `backend-svc` and everything else to `frontend-svc`. Traefik gives priority to the longer, more specific rule, so `/api` wins over `/`.
-- **TLS termination (2.2.1.2):** The browser's HTTPS connection ends at Traefik, which decrypts it with the certificate from `dso202-tls` and forwards plain HTTP to the pods on port 8080. The application containers need no certificate or TLS configuration.
-- **Name-based virtual hosting (2.2.1.3):** Both hostnames resolve to the same IP (`127.0.0.1`) and the same port (443). Traefik selects the rule using the `Host` header (and SNI for TLS): `app.dso202.local` serves the full application and `api.dso202.local` serves only the API.
+- **Path-based routing:** On `ranjung.com`, the path decides where the request goes. `/api` goes to `backend-svc`, and everything else goes to `frontend-svc`. Traefik checks the longer path `/api` first, so it doesn't get caught by `/`.
+- **Name-based virtual hosting:** `ranjung.com` and `api.ranjung.com` use the same IP (`127.0.0.1`) and the same port (80). Traefik looks at the `Host` header to choose the rule. `ranjung.com` serves the whole app, and `api.ranjung.com` serves only the API.
 
 ![Ingress objects](screesnot/15-ingress-list.png)
 
-> Both Ingresses use class `traefik` and serve the hosts `app.dso202.local,api.dso202.local`. The ADDRESS is `127.0.0.1`, published by Traefik through `ingressendpoint.ip`. `dso202-ingress` lists ports `80, 443` because it has a `tls` section. `dso202-ingress-http` is on port 80 only.
+The Ingress uses the `traefik` class, serves `ranjung.com,api.ranjung.com` on port 80, and has the address `127.0.0.1`.
 
-### 6.3 Hostname resolution
+### 6.2 Hostname resolution
 
-Both hostnames point to `127.0.0.1`. I added this line to the Windows hosts file (`C:\Windows\System32\drivers\etc\hosts`) for the browser, and to `/etc/hosts` in WSL for `curl`:
+Both hostnames have to point to my own computer. I added this line to the Windows hosts file (`C:\Windows\System32\drivers\etc\hosts`, edited as Administrator) for the browser, and to `/etc/hosts` in WSL for `curl`:
 
 ```
-127.0.0.1    app.dso202.local api.dso202.local
+127.0.0.1    ranjung.com api.ranjung.com
 ```
 
 ---
 
-## Task 7: Controller-Specific Annotations 
+## Task 7: Traefik Annotations
 
-The standard Ingress API only describes hosts, paths, backends and TLS. Features such as choosing an entrypoint, redirecting HTTP to HTTPS or adding response headers are **controller-specific**, so they are configured with annotations that only Traefik understands:
+A normal Ingress can only describe hosts, paths and backends. Anything else is controller-specific, so I configured it with annotations that only Traefik understands:
 
-| Annotation | Value | Purpose |
+| Annotation | Value | What it does |
 |---|---|---|
-| `traefik.ingress.kubernetes.io/router.entrypoints` | `websecure` / `web` | Which Traefik entrypoint (port) the router listens on |
-| `traefik.ingress.kubernetes.io/router.tls` | `"true"` | Enable TLS on this router |
-| `traefik.ingress.kubernetes.io/router.middlewares` | `<namespace>-<name>@kubernetescrd` | Attach Traefik Middleware CRDs to the route |
+| `traefik.ingress.kubernetes.io/router.entrypoints` | `web` | Makes the route listen on Traefik's `web` entrypoint (port 80) |
+| `traefik.ingress.kubernetes.io/router.middlewares` | `dso202-assignment-02-security-headers@kubernetescrd` | Attaches my `security-headers` Middleware to the route |
 
-The Middlewares are Traefik CRD objects (`Ingress/middleware.yaml`):
+The Middleware is a Traefik object defined in `Ingress/middleware.yaml`. It adds these headers to every response:
+
+- `X-Frame-Options: DENY`: stops other websites from showing my app inside a frame
+- `X-Content-Type-Options: nosniff`: stops the browser from guessing the file type
+- `Referrer-Policy: no-referrer`: doesn't send my URL to other sites
+- `X-Served-By: traefik-dso202`: a custom header, so I can easily see that Traefik handled the request
 
 ![Middlewares created](screesnot/14-middlewares.png)
 
-> Both Middlewares (`redirect-https` and `security-headers`) exist in the application namespace and are referenced by the Ingress annotations as `dso202-assignment-02-redirect-https@kubernetescrd` and `dso202-assignment-02-security-headers@kubernetescrd`.
+The `security-headers` Middleware exists in my namespace. The `curl -I` output shows the extra headers (`X-Frame-Options`, `X-Content-Type-Options`, `X-Served-By`), which proves Traefik applied the annotation.
 
 ---
 
 ## Task 8: Testing the Ingress
 
-### 8.1 Virtual host `app.dso202.local` serves the frontend
+### 8.1 Name-based virtual hosting
 
-![Frontend HTML through the Ingress over HTTPS](screesnot/17-virtual-hosting.png)
+![Virtual hosting with ranjung.com and api.ranjung.com](screesnot/17-virtual-hosting.png)
 
-> Requesting `https://app.dso202.local/` over HTTPS (port 443) returns the HTML of the *Field Log – Task Tracker* frontend. The request went through TLS termination at Traefik and then the `/` rule of the `app.dso202.local` host to `frontend-svc`.
+`http://ranjung.com/` returns the HTML of the *Field Log – Task Tracker* frontend. `http://api.ranjung.com/api/status` returns `{"status":"ok","db":"connected"}` from the backend. Both hostnames use the same IP and port, but Traefik sends them to different Services.
 
 ### 8.2 Path-based routing
 
 ![Path routing](screesnot/18-path-routing.png)
 
-> The path `/` on `app.dso202.local` returns `200 text/html`, the frontend page.
+On the same hostname, `/api/status` returns JSON from the backend, and `/` returns `200 text/html` from the frontend. The path decides which Service handles the request.
 
-### 8.3 End-to-end in the browser
+### 8.3 Testing in the browser
 
-I opened **https://app.dso202.local** in the browser. Because the certificate is self-signed, the browser shows a warning and marks the page as **"Not Secure"**. After I accepted it, the application loaded through the Ingress:
+I opened **http://ranjung.com** in my browser and the app loaded through the Ingress:
 
 ![Task Tracker through Ingress](screesnot/web_application.png)
 
-> The page is served from `app.dso202.local` over HTTPS through Traefik. The status pill shows **BACKEND + DB ONLINE**: the frontend called `/api/status` on the same host, the Ingress routed it to `backend-svc`, and the backend reached PostgreSQL at `db-0.db-headless`. The three seed tasks are loaded from the StatefulSet's database.
+The status shows **BACKEND + DB ONLINE**. The frontend called `/api/status` on the same hostname, the Ingress sent it to the backend, and the backend reached PostgreSQL at `db-0.db-headless`.
 
 ![CRUD operations through Ingress](screesnot/web_application_working.png)
 
-> I then tested the full CRUD flow through the Ingress. I created a new task (**#4 "Need to take a nap"**) and deleted tasks #2 and #3. Every action is a `POST`/`DELETE` request to `https://app.dso202.local/api/tasks`, which the `/api` rule routes to the backend. Task 1 keeps its status, and the new task got id 4, which shows the database sequence continued in the persistent volume.
+Then I tested adding and deleting tasks. I added task **#4 "Need to take a nap"** and deleted tasks #2 and #3. Each action sends a request to `http://ranjung.com/api/tasks`, and the `/api` rule sends it to the backend. The new task got id 4, which shows the database kept counting from its saved data.
+
+### 8.4 Why the browser says "Not Secure"
+
+![Browser showing Connection not secure](screesnot/connection_not_secure.png)
+
+Firefox shows **"Not Secure"** next to the address, and **"Your connection isn't secure"** when I click it. This is expected, because I didn't set up a TLS certificate. My app runs on plain **HTTP** (`http://ranjung.com`), not **HTTPS**, so the data between the browser and Traefik isn't encrypted. The app still works normally, as the **BACKEND + DB ONLINE** status and my tasks show.
+
+For a real website, I would add a TLS certificate to the Ingress so the site uses HTTPS. The browser would then show the connection as secure. For this assignment I kept the setup on plain HTTP and focused on the Ingress routing.
 
 ---
 
-## Task 9: StatefulSet Persistence: Deleting the Pod
+## Task 9: StatefulSet Persistence (Deleting the Pod)
 
-To prove that the StatefulSet gives a stable identity and stable storage, I deleted the database pod and watched the controller recreate it:
+To check that the database keeps its name and its data, I deleted the `db-0` pod and watched Kubernetes recreate it:
 
 ![db-0 deleted and recreated](screesnot/28-after-delete.png)
 
-> The StatefulSet controller immediately recreated the pod with the **same name `db-0`**. A Deployment would have created a pod with a new random name. The new pod was `1/1 Running` after about 12 seconds.
+Kubernetes recreated the pod straight away with the **same name, `db-0`**. A Deployment would have given it a new random name. The new pod was `1/1 Running` after about 12 seconds.
 
 ![Same PVC and same data after the restart](screesnot/29-browser-after-db-restart.png)
 
-> The pod's **IP changed** from `10.244.1.3` to `10.244.1.4`, but this does not matter, because clients use the DNS name `db-0.db-headless`, which now points to the new IP. The pod re-attached to the **same PVC `db-storage-db-0`**, bound to the same volume `pvc-5c1667e5-…` seen in Task 3. All rows are still in the `tasks` table, so the data outlived the pod.
+The pod's **IP changed** from `10.244.1.3` to `10.244.1.4`, but that doesn't matter, because the backend uses the name `db-0.db-headless`, which now points to the new IP. The pod reattached to the **same PVC, `db-storage-db-0`**, and all the rows are still in the `tasks` table. The data survived the pod being deleted.
 
 ---
 
-## Task 10: Ordered Deployment and Scaling
+## Task 10: Ordered Scaling and Updates
 
-### 10.1 Scaling up: 1 → 3
+### 10.1 Scaling up from 1 to 3
 
 ![Scale command](screesnot/30-scale.png)
 
-In a second terminal I watched the pods:
+I scaled the StatefulSet to 3 replicas and watched the pods in a second terminal:
 
 ![Ordered scale-up](screesnot/30-scale-up-order.png)
 
-> This shows the `OrderedReady` policy. **`db-1`** was created first and went through `Pending` → `ContainerCreating` → `Running 0/1` → `Running 1/1`. Only **after `db-1` became Ready (1/1)** did the controller create **`db-2`**. The pods were never started in parallel.
+This shows `OrderedReady` working. **`db-1`** was created first and went `Pending` → `ContainerCreating` → `Running 0/1` → `Running 1/1`. Only **after `db-1` was Ready** did Kubernetes create **`db-2`**. The pods never started at the same time.
 
-### 10.2 Ordered rolling update
+### 10.2 Rolling update
 
 ![Ordered rolling update](screesnot/33-rolling-update-order.png)
 
-> The update replaced the pods **one at a time** ("1 out of 3", "2 out of 3", "3 new pods have been updated"). Each time, it waited for the replaced pod to be Ready before moving on. A StatefulSet rolling update goes in reverse ordinal order (`db-2` → `db-1` → `db-0`), so the primary instance `db-0` is updated last.
+The update replaced the pods **one at a time** ("1 out of 3", "2 out of 3", then all 3), waiting for each pod to be Ready before moving to the next. A StatefulSet updates in reverse order (`db-2` → `db-1` → `db-0`), so `db-0`, the one the backend uses, is updated last.
 
-### 10.3 Scaling down: 3 → 1 and volume retention
+### 10.3 Scaling down from 3 to 1
 
 ![Scale down and PVC retention](screesnot/34-scale-down.png)
 
-> Scaling down removes pods in **reverse order** (`db-2` first, then `db-1`). The PVCs **`db-storage-db-1` and `db-storage-db-2` are still `Bound`**: the volume claim template created one PVC per pod, and `persistentVolumeClaimRetentionPolicy.whenScaled: Retain` keeps them after the pods are removed. If I scale up again, `db-1` and `db-2` re-attach to their own old volumes.
+The pods were removed in **reverse order** (`db-2` first, then `db-1`). The PVCs **`db-storage-db-1` and `db-storage-db-2` are still `Bound`**, because `whenScaled: Retain` keeps them. If I scale up again, `db-1` and `db-2` will reuse their old disks.
 
-> **Note:** `db-1` and `db-2` are independent PostgreSQL instances, not replicas of `db-0`. A StatefulSet gives each pod a stable identity and its own storage, but replicating data between them needs database-level replication (for example PostgreSQL streaming replication or an operator). The backend always connects to `db-0.db-headless`, which is why the stable identity of `db-0` matters.
+> **Note:** `db-1` and `db-2` are separate PostgreSQL databases, not copies of `db-0`. A StatefulSet gives each pod its own name and disk, but it doesn't copy data between them. That needs PostgreSQL replication. This is why my backend always connects to `db-0.db-headless`.
 
 ---
 
@@ -271,46 +296,46 @@ In a second terminal I watched the pods:
 
 **What I learned about StatefulSets**
 
-Before this assignment, I thought a Deployment was enough for everything. In Assignment 1 my database ran as a Deployment and it worked, so I did not see a problem. Now I understand the difference. A Deployment treats all pods as the same: if a pod dies, the new one gets a random name and Kubernetes does not care which pod is which. That is fine for the frontend and backend, because they do not keep any data.
+Before this assignment, I thought a Deployment was enough for everything. My database worked as a Deployment in Assignment 1, so I didn't see a problem. Now I understand the difference. A Deployment treats all its pods as the same. If a pod dies, the new one gets a random name, and Kubernetes doesn't care which pod is which. That's fine for my frontend and backend, because they don't keep any data.
 
-A database is different. It keeps data, and other parts of the app need to find it by a name that does not change. With a StatefulSet, my database pod is always called `db-0`, it always has the DNS name `db-0.db-headless`, and it always gets back its own disk (`db-storage-db-0`). When I deleted the pod, I saw this happen: the new pod had a different IP address, but the same name, the same disk, and all my tasks were still there. Seeing it with my own eyes made the idea much clearer than just reading about it.
+A database is different. It keeps data, and the backend needs to find it by a name that doesn't change. With a StatefulSet, my database pod is always called `db-0`, it always has the DNS name `db-0.db-headless`, and it always gets its own disk (`db-storage-db-0`) back. When I deleted the pod, the new one had a different IP but the same name, the same disk, and all my tasks were still there. Seeing this myself made it much clearer than just reading about it.
 
-I also learned why the **headless Service** is needed. A normal Service gives one IP address and spreads the traffic across all pods. A headless Service (`clusterIP: None`) does not do that. Instead, it gives every pod its own DNS name, which is exactly what a database needs. And with **volumeClaimTemplates**, I did not have to write a PVC file by hand. The StatefulSet created one disk for each pod automatically, so when I scaled up to 3 pods, I got 3 disks.
+I also learned why the **headless Service** is needed. A normal Service has one IP and spreads traffic across all the pods. A headless Service (`clusterIP: None`) gives each pod its own DNS name instead, which is what a database needs. With **volumeClaimTemplates**, I didn't have to write a PVC by hand. The StatefulSet made one disk for each pod, so when I scaled to 3 pods, I got 3 disks.
 
-The scaling test showed me **ordered deployment** in action. `db-2` did not start until `db-1` was fully ready, and when I scaled down, the pods were removed in reverse order. The disks of the removed pods were kept, so no data was lost. I also understood that a StatefulSet does **not** copy data between pods: `db-1` and `db-2` were separate, empty databases. Real replication has to be set up inside PostgreSQL itself.
+The scaling test showed me **ordered deployment**. `db-2` didn't start until `db-1` was ready, and when I scaled down, the pods were removed in reverse order while their disks were kept. I also learned that a StatefulSet does **not** copy data between pods: `db-1` and `db-2` were separate, empty databases.
 
 **What I learned about Ingress**
 
-In Assignment 1, I opened the frontend with a NodePort (port 30080) and used port-forwarding for testing. That works, but in a real system you cannot open a new port for every service. With Ingress, there is **one entry point** (ports 80 and 443), and the Ingress Controller decides where each request should go:
+In Assignment 1, I opened the frontend with a NodePort (port 30080). That works, but in a real system you can't open a new port for every service. With Ingress there is **one entry point** (port 80), and the Ingress Controller decides where each request goes:
 
 - by **path**: `/api` goes to the backend and everything else goes to the frontend,
-- by **hostname**: `app.dso202.local` and `api.dso202.local` use the same IP and port but reach different services,
-- with **TLS**: HTTPS is handled by Traefik, so my application containers did not need any certificate.
+- by **hostname**: `ranjung.com` and `api.ranjung.com` use the same IP and port but reach different services.
 
-I also learned that an Ingress object is only a set of rules. Nothing happens until an **Ingress Controller** is running to read those rules. Features that the standard Ingress does not have, like redirecting HTTP to HTTPS or adding security headers, are added with **annotations** that only that controller understands. That is why my annotations start with `traefik.ingress.kubernetes.io/`.
+I also saw how the work is split between the nodes. Traefik runs on the control-plane node and receives all the traffic, then sends each request to the frontend or backend pods running on the worker nodes. The control-plane is only the entry point, and the workers do the real work.
+
+I also learned that an Ingress is only a set of rules. Nothing happens until an **Ingress Controller** is running to read them. Extra features, like adding security headers, are set with **annotations** that only that controller understands. That's why my annotations start with `traefik.ingress.kubernetes.io/`.
 
 **Challenges I faced**
 
-The hardest part was setting up the Ingress Controller. My first try with the NGINX Ingress Controller failed twice: first the pod could not be scheduled because my node did not have the `ingress-ready=true` label, and then a webhook secret was missing. I moved to Traefik, and I learned that on kind the controller has to run on the control-plane node, because that is the only node where ports 80 and 443 are opened to my computer. I fixed this with a `nodeSelector`, a toleration and `hostPort`.
+The hardest part was setting up the Ingress Controller. NGINX failed twice: first because my node didn't have the `ingress-ready=true` label, and then because a webhook secret was missing. I moved to Traefik and learned that on kind, the controller has to run on the control-plane node, because that's the only node where port 80 is open to my computer. I fixed this with a `nodeSelector`, a toleration and `hostPort`.
 
-I also made some small mistakes that took time to find:
+I also made some smaller mistakes that took time to find:
 
-- My `DB_HOST` was `db-0.db-svc`, but my headless Service was called `db-headless`, so the backend could not connect to the database. The pod name and the Service name must match exactly.
-- The frontend was calling `/api/api/tasks` because the `/api` part was added twice.
-- I applied the Traefik Deployment before its ServiceAccount, so the pod was never created. Running `kubectl describe` on the ReplicaSet showed me the exact error.
-- I had many old and duplicate YAML files from earlier attempts, which made it confusing to know which file was really being used. Cleaning them up made the project much easier to follow.
+- My `DB_HOST` was `db-0.db-svc`, but my headless Service was called `db-headless`, so the backend couldn't reach the database. The names have to match exactly.
+- The frontend was calling `/api/api/tasks` because `/api` was added twice.
+- I applied the Traefik Deployment before its ServiceAccount, so no pod was created. `kubectl describe` on the ReplicaSet showed me the error.
+- When I updated Traefik, the new pod got stuck in `Pending` because the old pod was still using port 80 on the node. I fixed it by deleting the old pod and changing the Deployment strategy to `Recreate`, so the old pod is removed before the new one starts.
+- On Windows, my browser said "server not found" for `ranjung.com` even though `curl` worked in WSL. The browser uses the Windows hosts file, not the WSL one, so I had to add the hostname there too (as Administrator).
 
-From these problems, I learned to always check `kubectl describe` and `kubectl logs` first, because the error message usually tells you exactly what is wrong.
-
-Overall, this assignment helped me understand **why** Kubernetes has different objects for different jobs: Deployments for apps that do not keep data, StatefulSets for apps that do, and Ingress for bringing outside traffic into the cluster in a clean and secure way.
+From these problems, I learned to always check `kubectl describe` and `kubectl logs` first, because the error message usually tells you exactly what's wrong.
 
 ---
 
 ## Conclusion
 
-In this assignment, I re-implemented the Assignment 1 Task Tracker using the Unit 2 concepts:
+In this assignment, I deployed my Assignment 1 Task Tracker again using Unit 2 concepts:
 
-- The **database** now runs as a **StatefulSet**. It has a stable pod name (`db-0`), a stable DNS identity through a **headless Service** (`db-0.db-headless`) and its own PersistentVolumeClaim created by **volumeClaimTemplates**. Deleting the pod showed that it comes back with the same name, the same volume and the same data. Scaling showed that pods are created strictly in order (`db-1` Ready before `db-2`), updated one at a time and removed in reverse order, while their volumes are retained.
-- The **Traefik Ingress Controller** replaced the NodePort as the single entry point to the application. One Ingress provides **path-based routing** (`/api` vs `/`), **TLS termination** with a self-signed certificate, and **name-based virtual hosting** (`app.dso202.local` and `api.dso202.local` on the same IP and port). **Traefik annotations** add controller-specific features: entrypoint selection, TLS, an HTTP→HTTPS redirect and security headers through Middleware CRDs.
+- The **database** runs as a **StatefulSet** with a fixed pod name (`db-0`), a fixed DNS name from a **headless Service** (`db-0.db-headless`), and its own disk from **volumeClaimTemplates**. When I deleted the pod, it came back with the same name, disk and data. When I scaled, pods were created in order, updated one at a time and removed in reverse order, and their disks were kept.
+- The **Traefik Ingress Controller** replaced the NodePort as the single entry point. It runs on the **control-plane node** and sends the traffic to the frontend, backend and database pods on the **worker nodes**. One Ingress does **path-based routing** (`/api` and `/`) and **name-based virtual hosting** (`ranjung.com` and `api.ranjung.com` on the same IP and port). **Traefik annotations** choose the entrypoint and add security headers through a Middleware.
 
-The application works end to end in the browser at `https://app.dso202.local`: frontend, backend and the StatefulSet database all communicate through the Ingress and the stable DNS name.
+The app works in the browser at **http://ranjung.com**: the frontend, backend and database all talk to each other through the Ingress and the fixed DNS name.

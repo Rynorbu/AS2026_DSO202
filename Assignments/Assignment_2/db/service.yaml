@@ -1,30 +1,3 @@
-# =============================================================================
-# File        : db/service.yaml
-# Assignment  : DSO202 Assignment 2
-# Purpose     : A headless Service for the database StatefulSet.
-#
-#               NORMAL Service  = has one IP address, load-balances traffic
-#                                 across all matching Pods
-#               HEADLESS Service = has NO IP address (clusterIP: None),
-#                                 instead gives each Pod its own DNS name
-#
-#               We need a headless Service for the database because:
-#               - A database Pod needs a STABLE, PREDICTABLE name
-#               - The StatefulSet uses this Service to give each Pod a
-#                 unique DNS entry:
-#                   db-0.db-headless.dso202-assignment-02.svc.cluster.local
-#                   ^^^^  ^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^
-#                   pod   service     namespace
-#
-#               IMPORTANT: This file MUST be applied BEFORE the StatefulSet
-#               (db/statefulset.yaml). The StatefulSet looks for this Service by name
-#               when it starts. If it does not exist, DNS names will not work.
-#
-# Apply with  : kubectl apply -f db/service.yaml
-# Verify      : kubectl get service db-headless -n dso202-assignment-02
-#               The CLUSTER-IP column must show "None"
-# =============================================================================
-
 apiVersion: v1
 kind: Service
 metadata:
