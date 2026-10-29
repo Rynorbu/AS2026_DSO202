@@ -337,5 +337,3 @@ In this assignment, I deployed my Assignment 1 Task Tracker again using Unit 2 c
 
 - The **database** runs as a **StatefulSet** with a fixed pod name (`db-0`), a fixed DNS name from a **headless Service** (`db-0.db-headless`), and its own disk from **volumeClaimTemplates**. When I deleted the pod, it came back with the same name, disk and data. When I scaled, pods were created in order, updated one at a time and removed in reverse order, and their disks were kept.
 - The **Traefik Ingress Controller** replaced the NodePort as the single entry point. It runs on the **control-plane node** and sends the traffic to the frontend, backend and database pods on the **worker nodes**. One Ingress does **path-based routing** (`/api` and `/`) and **name-based virtual hosting** (`ranjung.com` and `api.ranjung.com` on the same IP and port). **Traefik annotations** choose the entrypoint and add security headers through a Middleware.
-
-The app works in the browser at **http://ranjung.com**: the frontend, backend and database all talk to each other through the Ingress and the fixed DNS name.
