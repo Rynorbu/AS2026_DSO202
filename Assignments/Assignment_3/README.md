@@ -1,9 +1,5 @@
 # DSO202 Assignment 3: Deploying the Task Tracker with Kustomize and Helm
 
-**Environment:** Windows 11 with WSL (Ubuntu), kind cluster `ingress` (Kubernetes v1.36.1, 1 control-plane and 2 worker nodes), kubectl (with built-in Kustomize) and Helm 3.18
-
----
-
 ## Introduction
 
 In Assignment 1, I deployed a three-tier **Task Tracker** application on Kubernetes. It has three parts:
@@ -53,6 +49,38 @@ I used four separate namespaces, so the deployments never mixed:
 |---|---|---|
 | Kustomize | `dso202-a3-kust-dev` | `dso202-a3-kust-prod` |
 | Helm | `dso202-a3-helm-dev` (release `tt-dev`) | `dso202-a3-helm-prod` (release `tt-prod`) |
+
+### Unit 4 concepts I used
+
+The table below links each concept from the Unit 4 lecture notes to the part of this report where I used it.
+
+| Concept from the notes | Where I used it |
+|---|---|
+| **Kustomize: base and overlays** | One shared base with dev and prod overlays (A.1, A.3) |
+| Compose with `resources:` (including `../../base`) | Base `kustomization.yaml` and both overlays (A.1, A.3) |
+| Transformers: `namespace:`, `labels:`, `replicas:`, `images:` | Overlays (A.3, Figures 4–6, 15) |
+| `includeSelectors: false` for safe labels | Labels added without touching selectors (A.3, Figure 15) |
+| Strategic merge patch | Frontend NodePort (dev) and backend CPU (prod) (A.3, Figures 4–5) |
+| JSON 6902 patch with `target:` | Database volume 1Gi → 2Gi in prod (A.3, Figure 25) |
+| `configMapGenerator` and `secretGenerator` (`literals`, `envs`) | ConfigMap and Secret generated instead of hand-written (A.2, Figure 16) |
+| Generator `behavior: merge` in an overlay | `CORS_ORIGIN` changed per environment (A.3, A.8) |
+| Hash suffix and automatic rollout | ConfigMap change rolled out new Pods (A.8, Figures 18–22) |
+| Render first, then diff, then apply, then verify | `kubectl kustomize` → `kubectl diff -k` → `kubectl apply -k` (A.4–A.6, A.9) |
+| **Helm: chart structure** | `Chart.yaml`, `values.yaml`, `values.schema.json`, `templates/`, `_helpers.tpl`, `NOTES.txt`, `tests/` (B.1) |
+| `version` vs `appVersion` | Chart `0.1.0`, app `1.0` (B.1, Figure 62) |
+| Go templating: values, built-in objects, `include`, `default`, `required`, `if`, `toYaml`/`nindent`, `b64enc` | All templates (B.2, Figure 32) |
+| Named templates and stable selector labels | `_helpers.tpl` (B.2, Figure 32) |
+| `checksum/config` annotation for rollouts | Upgrade rolled the Pods (B.7, Figure 49) |
+| Values precedence: defaults → `-f` files → `--set` | Environment and secrets files layered on `values.yaml`; `--set` shown in B.8 |
+| Validation layers: `required`, JSON schema, `helm lint`, `helm template`, server dry run | Four bad inputs blocked, then a server-side dry run (B.3–B.4, Figures 31–36) |
+| Install / upgrade / history / rollback | Revisions 1 → 2 → 3 (B.5, B.7, B.9, Figures 37, 50, 53–54) |
+| Release records stored as Secrets | `sh.helm.release.v1.tt-dev.v1` (B.5, Figures 40–41) |
+| Upgrade pitfall with `--set` | Blocked safely by `required` (B.8, Figure 52) |
+| `helm test` hook | Passed in dev and prod (B.6, B.10, Figures 42, 58) |
+| Rollback does not roll back data | Task still present after rollback (B.9, Figure 55) |
+| Secrets are visible in release values | `helm get values` and `base64 -d` (B.11, Figures 60–61) |
+| Packaging and distribution | `helm package` (B.12, Figure 62) |
+| **Kustomize vs Helm** | Comparison section, using my own results |
 
 ---
 
