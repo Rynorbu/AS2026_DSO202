@@ -1,0 +1,12 @@
+global:
+  environment: dev
+
+frontend:
+  replicaCount: 1
+  service:
+    type: NodePort
+    nodePort: 30080
+
+backend:
+  replicaCount: 2
+  corsOrigin: "http://localhost:30080"

@@ -1,0 +1,5 @@
+# real credentials - never commit
+kustomize/base/db-secret.env
+helm/environments/secrets-*.yaml
+# packaged charts
+*.tgz

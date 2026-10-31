@@ -1,0 +1,13 @@
+apiVersion: v2
+name: task-tracker
+description: Three-tier Task Tracker (nginx frontend, Node.js backend, PostgreSQL) from DSO202 Assignment 1
+type: application
+version: 0.1.0
+appVersion: "1.0"
+kubeVersion: ">=1.30.0-0"
+keywords:
+  - dso202
+  - three-tier
+  - postgres
+maintainers:
+  - name: Ranjung

@@ -1,0 +1,21 @@
+Task Tracker deployed.
+
+  Release:     {{ .Release.Name }} (revision {{ .Release.Revision }})
+  Namespace:   {{ .Release.Namespace }}
+  Environment: {{ include "task-tracker.environment" . }}
+  Replicas:    frontend={{ .Values.frontend.replicaCount }} backend={{ .Values.backend.replicaCount }} db=1
+
+Frontend:
+{{- if and (eq .Values.frontend.service.type "NodePort") .Values.frontend.service.nodePort }}
+  http://localhost:{{ .Values.frontend.service.nodePort }}
+{{- else }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "task-tracker.frontendHost" . }} 8081:{{ .Values.frontend.service.port }}
+  then open http://localhost:8081
+{{- end }}
+
+Backend API (internal only - port-forward to test):
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "task-tracker.backendHost" . }} 8080:{{ .Values.backend.port }}
+  curl http://localhost:8080/api/status
+
+Run the connectivity test:
+  helm test {{ .Release.Name }} -n {{ .Release.Namespace }}

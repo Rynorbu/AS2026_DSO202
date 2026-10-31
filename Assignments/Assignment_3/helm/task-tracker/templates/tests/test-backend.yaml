@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "task-tracker.fullname" . }}-test-backend
+  labels:
+    {{- include "task-tracker.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  restartPolicy: Never
+  containers:
+    - name: wget
+      image: busybox:1.37
+      command:
+        - sh
+        - -c
+        - |
+          wget -qO- http://{{ include "task-tracker.backendHost" . }}:{{ .Values.backend.port }}/api/status | grep '"db":"connected"'
+      resources:
+        requests: {cpu: 50m, memory: 64Mi}
+        limits: {cpu: 100m, memory: 64Mi}

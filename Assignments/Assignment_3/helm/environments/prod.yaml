@@ -1,0 +1,16 @@
+global:
+  environment: prod
+
+frontend:
+  replicaCount: 2
+
+backend:
+  replicaCount: 2
+  corsOrigin: "http://localhost:8081"
+  resources:
+    requests: {cpu: 150m, memory: 128Mi}
+    limits: {cpu: 300m, memory: 256Mi}
+
+database:
+  persistence:
+    size: 2Gi

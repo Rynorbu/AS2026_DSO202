@@ -1,0 +1,66 @@
+# Default values for the task-tracker chart.
+# Every environment file in ../environments only overrides what differs.
+
+global:
+  environment: ""            # dev | prod - required, set in environments/<env>.yaml
+
+nameOverride: ""
+fullnameOverride: ""
+
+frontend:
+  replicaCount: 1
+  image:
+    repository: rynorbu11/dso202-frontend
+    tag: ""                  # empty -> .Chart.AppVersion
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP          # ClusterIP | NodePort
+    port: 8080
+    nodePort: null           # 30000-32767, only used when type is NodePort
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {cpu: 150m, memory: 128Mi}
+
+backend:
+  replicaCount: 1
+  image:
+    repository: rynorbu11/dso202-backend
+    tag: ""
+    pullPolicy: IfNotPresent
+  port: 8080
+  corsOrigin: "*"
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: 250m, memory: 256Mi}
+
+database:
+  image:
+    repository: rynorbu11/dso202-db
+    tag: ""
+    pullPolicy: IfNotPresent
+  port: 5432
+  name: tasksdb
+  # Credentials have no defaults on purpose. Supply them from a values file
+  # that is NOT committed (environments/secrets-<env>.yaml).
+  user: ""
+  password: ""
+  persistence:
+    size: 1Gi
+    storageClassName: ""     # empty -> cluster default StorageClass
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: 250m, memory: 256Mi}
+
+quota:
+  enabled: true
+  hard:
+    requests.cpu: "1"
+    requests.memory: 1Gi
+    limits.cpu: "2"
+    limits.memory: 2Gi
+    pods: "10"
+  limitRange:
+    default: {cpu: 200m, memory: 256Mi}
+    defaultRequest: {cpu: 100m, memory: 128Mi}
+    min: {cpu: 50m, memory: 64Mi}
+    max: {cpu: 500m, memory: 512Mi}

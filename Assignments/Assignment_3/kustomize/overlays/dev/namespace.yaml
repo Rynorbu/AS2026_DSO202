@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dso202-a3-kust-dev
+  labels:
+    course: dso202
+    assignment: "3"

@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["global", "frontend", "backend", "database"],
+  "properties": {
+    "global": {
+      "type": "object",
+      "properties": {
+        "environment": { "type": "string", "enum": ["", "dev", "prod"] }
+      }
+    },
+    "frontend": {
+      "type": "object",
+      "properties": {
+        "replicaCount": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "image": {
+          "type": "object",
+          "properties": { "tag": { "type": "string" } }
+        },
+        "service": {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "enum": ["ClusterIP", "NodePort"] },
+            "port": { "type": "integer" },
+            "nodePort": {
+              "anyOf": [
+                { "type": "null" },
+                { "type": "integer", "minimum": 30000, "maximum": 32767 }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "backend": {
+      "type": "object",
+      "properties": {
+        "replicaCount": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "image": {
+          "type": "object",
+          "properties": { "tag": { "type": "string" } }
+        },
+        "port": { "type": "integer" },
+        "corsOrigin": { "type": "string" }
+      }
+    },
+    "database": {
+      "type": "object",
+      "properties": {
+        "image": {
+          "type": "object",
+          "properties": { "tag": { "type": "string" } }
+        },
+        "port": { "type": "integer" },
+        "name": { "type": "string", "minLength": 1 },
+        "user": { "type": "string" },
+        "password": { "type": "string" },
+        "persistence": {
+          "type": "object",
+          "properties": {
+            "size": { "type": "string", "pattern": "^[0-9]+(Mi|Gi)$" }
+          }
+        }
+      }
+    }
+  }
+}
